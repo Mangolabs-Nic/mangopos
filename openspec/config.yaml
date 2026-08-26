@@ -1,0 +1,50 @@
+project: pooppos
+name: MangoLabs POS Rebuild
+description: Documentation site for the MangoLabs POS rebuild project
+stack:
+  runtime: node
+  node_version: ">=20"
+  framework: docusaurus
+  docusaurus_version: "3.10.2"
+  ui_library: react
+  react_version: "19.1.1"
+  language: javascript
+  module_system: esm
+  package_manager: npm
+  workspaces: true
+  workspace_packages:
+    - "@mangolabs/pos-rebuild-docs"
+architecture:
+  pattern: monorepo
+  apps:
+    - name: rebuild-docs
+      path: apps/rebuild-docs
+      type: documentation
+      framework: docusaurus
+testing:
+  strict_tdd: false
+  test_runner: none
+  test_files: 0
+  test_scripts: []
+  coverage: none
+  layers: []
+  recommendation: "If tests are needed, Vitest + React Testing Library for React components, Playwright for Docusaurus E2E"
+linting:
+  eslint: false
+  prettier: false
+  stylelint: false
+ci:
+  provider: github_actions
+  workflows:
+    - name: Deploy rebuild documentation
+      path: .github/workflows/docs.yml
+      triggers: [pull_request, push, workflow_dispatch]
+      deploy_target: github_pages
+conventions:
+  commit_style: unknown
+  branch_strategy: unknown
+  code_style: none_enforced
+persistence:
+  mode: hybrid
+  openspec: true
+  engram: true
