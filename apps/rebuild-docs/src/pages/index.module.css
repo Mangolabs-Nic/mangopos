@@ -1,0 +1,114 @@
+.hero {
+  min-height: calc(100vh - var(--ifm-navbar-height));
+  padding: clamp(5rem, 12vw, 10rem) max(1.5rem, calc((100% - 70rem) / 2));
+  background:
+    radial-gradient(circle at 82% 18%, rgb(255 183 77 / 32%), transparent 22rem),
+    radial-gradient(circle at 12% 85%, rgb(57 109 82 / 32%), transparent 25rem),
+    var(--ifm-background-color);
+}
+
+.eyebrow {
+  color: var(--ifm-color-primary);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.hero h1 {
+  max-width: 13ch;
+  margin: 1rem 0;
+  color: var(--ifm-heading-color);
+  font-size: clamp(3rem, 8vw, 6.8rem);
+  letter-spacing: -0.07em;
+  line-height: 0.93;
+}
+
+.hero em {
+  color: var(--ifm-color-primary);
+  font-family: Georgia, serif;
+  font-weight: 400;
+}
+
+.summary {
+  max-width: 42rem;
+  font-size: clamp(1.1rem, 2vw, 1.35rem);
+  line-height: 1.6;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+  margin-top: 2.25rem;
+}
+
+.primaryAction,
+.secondaryAction {
+  border-radius: 999px;
+  font-weight: 800;
+  padding: 0.78rem 1.2rem;
+  text-decoration: none;
+}
+
+.primaryAction {
+  background: var(--ifm-color-primary);
+  color: #16251d;
+}
+
+.secondaryAction {
+  border: 1px solid var(--ifm-color-emphasis-400);
+  color: var(--ifm-font-color-base);
+}
+
+.highlights {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0 auto;
+  max-width: 70rem;
+}
+
+.highlight {
+  border-left: 1px solid var(--ifm-color-emphasis-300);
+  padding: 2.25rem;
+}
+
+.highlight:first-child {
+  border-left: 0;
+}
+
+.highlight span {
+  color: var(--ifm-color-primary-dark);
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.highlight h2 {
+  font-size: 1.25rem;
+  margin: 0.7rem 0;
+}
+
+.highlight p {
+  margin: 0;
+}
+
+@media (max-width: 720px) {
+  .hero {
+    min-height: auto;
+  }
+
+  .highlights {
+    grid-template-columns: 1fr;
+  }
+
+  .highlight,
+  .highlight:first-child {
+    border-left: 0;
+    border-top: 1px solid var(--ifm-color-emphasis-300);
+  }
+
+  .highlight:first-child {
+    border-top: 0;
+  }
+}

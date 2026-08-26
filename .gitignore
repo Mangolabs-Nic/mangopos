@@ -1,0 +1,4 @@
+node_modules/
+apps/rebuild-docs/build/
+apps/rebuild-docs/.docusaurus/
+.turbo/
