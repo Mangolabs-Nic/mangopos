@@ -25,6 +25,22 @@ const sidebars = {
     },
     {
       type: 'category',
+      label: 'POS Features',
+      items: [
+        'features/overview',
+        'features/ventas',
+        'features/gastos',
+        'features/inventario',
+        'features/clientes',
+        'features/proveedores',
+        'features/empleados',
+        'features/reportes',
+        'features/cuentas',
+        'features/configuracion',
+      ],
+    },
+    {
+      type: 'category',
       label: 'Architecture',
       items: ['architecture/overview'],
     },
