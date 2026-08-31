@@ -8,6 +8,7 @@ const sidebars = {
       items: [
         'rebuild/roadmap',
         'rebuild/decisions',
+        'rebuild/migration-plan',
         'rebuild/data-migration',
         'rebuild/pilot-cutover',
       ],
@@ -26,7 +27,7 @@ const sidebars = {
     {
       type: 'category',
       label: 'Architecture',
-      items: ['architecture/overview'],
+      items: ['architecture/overview', 'architecture/godot-legacy'],
     },
     {
       type: 'category',

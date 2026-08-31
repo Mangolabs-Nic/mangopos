@@ -9,9 +9,21 @@ import { ComponentArchitectureDiagram } from '@site/src/components/diagrams';
 import { DeploymentArchDiagram } from '@site/src/components/diagrams';
 import { SecurityModelDiagram } from '@site/src/components/diagrams';
 
-## System context
+## Current system (Godot + SQLite)
 
-PoopPOS is a hybrid POS system: a cloud API and database with a React frontend that can operate in connected mode.
+PoopPOS today is a **Godot 4.7 desktop application** with SQLite storage and a built-in web server. See the [Godot legacy documentation](./godot-legacy) for full details.
+
+| Layer | Current | Target |
+| --- | --- | --- |
+| Runtime | Godot 4.7 (GDScript) | NestJS (TypeScript) |
+| Frontend | Godot scenes (Control nodes) | React 19 (Vite) |
+| Database | SQLite (file-based) | PostgreSQL (Supabase) |
+| Auth | PIN + opaque tokens | JWT (Supabase Auth) |
+| Hosting | Desktop / browser export | Railway + GitHub Pages |
+
+## Target system (NestJS + React + Supabase)
+
+The [migration plan](../rebuild/migration-plan) details how each Godot module maps to the NestJS architecture below.
 
 **Drag nodes to rearrange. Scroll to zoom. MiniMap in bottom-right.**
 
@@ -23,7 +35,7 @@ PoopPOS is a hybrid POS system: a cloud API and database with a React frontend t
 <ComponentArchitectureDiagram />
 </div>
 
-## Technology stack
+## Target technology stack
 
 | Layer | Technology | Purpose |
 | --- | --- | --- |
