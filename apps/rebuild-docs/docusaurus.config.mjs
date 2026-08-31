@@ -7,7 +7,7 @@ const projectName = process.env.PROJECT_NAME ?? 'pooppos';
 const config = {
   title: 'MangoLabs POS Rebuild',
   tagline: 'A safe path from PoopPOS to a pilot-ready commercial POS.',
-  favicon: 'img/mango-mark.svg',
+  favicon: 'img/mango-02.png',
   url: `https://${organizationName}.github.io`,
   baseUrl: `/${projectName}/docs/`,
   organizationName,
@@ -35,12 +35,12 @@ const config = {
     ],
   ],
   themeConfig: {
-    image: 'img/mango-mark.svg',
+    image: 'img/mango-02.png',
     navbar: {
       title: 'MangoLabs POS',
       logo: {
         alt: 'MangoLabs POS',
-        src: 'img/mango-mark.svg',
+        src: 'img/mango-02.png',
       },
       items: [
         {type: 'docSidebar', sidebarId: 'rebuildSidebar', position: 'left', label: 'Rebuild guide'},

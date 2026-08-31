@@ -12,7 +12,7 @@ These are gates, not implementation details. Close them before moving code or im
 | Intellectual property | Both founders | Gerald owns all POS code (including core based on PoopPOS). Explicitly agreed between founders. |
 | Repository ownership and access | Both founders | @geraldb1996 and @khincer are admins. Branch protection: require PR, 1 approval, status checks, no force push/delete. |
 | Pilot deployment model | Kirk Incer and Gerald | Hybrid deployment. Domain: mango-labs.dev. Hosting: Railway (provisional). Owner: Kirk Incer. |
-| Actual technical baseline | Technical owner | Backend: Nest.JS. Frontend: React. Database: Postgres (Supabase). Auth: Supabase. |
+| Actual technical baseline | Technical owner | **Current:** Godot 4.7 + GDScript + SQLite. **Target:** NestJS + React + Supabase (Postgres + Auth). See [migration plan](./migration-plan). |
 | Data to migrate | Technical owner and pilot business | To be defined after technical audit of desktop POS source. |
 
 ## Current status
