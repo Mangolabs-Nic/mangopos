@@ -8,6 +8,10 @@
   "scripts": {
     "docs:start": "turbo run start --filter=@mangolabs/pos-rebuild-docs",
     "docs:build": "turbo run build --filter=@mangolabs/pos-rebuild-docs",
+    "api:dev": "npm run start:dev --workspace=@mangolabs/pos-api",
+    "api:build": "turbo run build --filter=@mangolabs/pos-api",
+    "api:start": "npm run start:prod --workspace=@mangolabs/pos-api",
+    "api:test": "npm run test --workspace=@mangolabs/pos-api",
     "turbo:graph": "turbo run build --graph"
   },
   "engines": {

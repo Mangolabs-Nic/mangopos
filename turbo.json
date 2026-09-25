@@ -6,6 +6,10 @@
       "outputs": ["build/**"],
       "inputs": ["src/**"]
     },
+    "@mangolabs/pos-api#build": {
+      "outputs": ["dist/**"],
+      "inputs": ["src/**", "tsconfig.json", "tsconfig.build.json", "nest-cli.json"]
+    },
     "start": {
       "cache": false,
       "persistent": true
