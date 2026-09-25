@@ -13,6 +13,7 @@
     "api:build": "turbo run build --filter=@mangolabs/pos-api",
     "api:start": "npm run start:prod --workspace=@mangolabs/pos-api",
     "api:test": "npm run test --workspace=@mangolabs/pos-api",
+    "db:verify": "cmd /c type scripts\\verify-schema.sql | docker exec -i supabase_db_pooppos psql -U postgres -d postgres",
     "docs:start": "turbo run start --filter=@mangolabs/pos-rebuild-docs",
     "docs:build": "turbo run build --filter=@mangolabs/pos-rebuild-docs",
     "turbo:graph": "turbo run build --graph"
