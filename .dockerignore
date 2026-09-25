@@ -1,0 +1,18 @@
+# Build context is the repo root, so keep host artifacts out of the image.
+node_modules
+**/node_modules
+**/dist
+**/build
+**/.docusaurus
+**/.turbo
+**/*.tsbuildinfo
+
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+
+supabase/.temp
+.atl
+README.md
