@@ -113,14 +113,45 @@ erDiagram
 
 ## Multi-tenant isolation
 
-Every table (except `audit_log` for cross-business admin views) includes a `business_id` foreign key. Row-Level Security (RLS) policies filter queries by the authenticated user's `business_id`.
+Every tenant-owned table includes a `business_id` foreign key, and Row-Level Security
+filters queries by the authenticated user's business. Join tables (`sale_items`,
+`stock_adjustments`) deliberately omit it and resolve tenancy through their parent, so
+a tenant key can never drift between rows.
+
+### Do not read `business_id` from the JWT
 
 ```sql
--- Example RLS policy
-CREATE POLICY "Users can only access their business"
-ON products FOR ALL
-USING (business_id = auth.jwt() ->> 'business_id');
+-- WRONG. Supabase does not put business_id in the JWT unless you build a
+-- custom access-token hook. Without one this matches zero rows and every
+-- query returns nothing, with no error.
+CREATE POLICY products_own ON products
+    FOR ALL USING (business_id = auth.jwt() ->> 'business_id');
 ```
+
+Resolve the tenant through a `SECURITY DEFINER` function instead. `SECURITY DEFINER`
+is required, not stylistic: `profiles` has its own RLS, so a policy on `profiles` that
+queries `profiles` would recurse infinitely.
+
+```sql
+-- CORRECT — this is what migration 001 ships.
+CREATE FUNCTION public.current_business_id()
+RETURNS uuid
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT business_id FROM public.profiles WHERE id = auth.uid()
+$$;
+
+CREATE POLICY products_own ON public.products
+    FOR ALL USING (business_id = public.current_business_id());
+```
+
+The same applies to trigger functions that write to a protected table. A
+`SECURITY INVOKER` trigger is evaluated against the calling user's RLS policies, so a
+trigger that inserts into a table whose `INSERT` policy is closed will have its own
+write rejected. `audit_row_change()` is `SECURITY DEFINER` for that reason.
 
 ## Audit triggers
 
