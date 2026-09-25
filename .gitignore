@@ -2,3 +2,12 @@ node_modules/
 apps/rebuild-docs/build/
 apps/rebuild-docs/.docusaurus/
 .turbo/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+supabase/.temp/
+
+# Agent tooling caches
+.atl/.skill-registry.cache.json
