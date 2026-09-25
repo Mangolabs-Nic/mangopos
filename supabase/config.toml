@@ -84,7 +84,8 @@ allowed_cidrs_v6 = ["::/0"]
 # enabled = true
 
 [realtime]
-enabled = true
+# Disabled for the MVP dev profile: the POS has no live-subscription requirement.
+enabled = false
 # Bind realtime via either IPv4 or IPv6. (default: IPv4)
 # ip_version = "IPv6"
 # The maximum length in bytes of HTTP request headers. (default: 4096)
@@ -112,7 +113,8 @@ port = 54324
 # sender_name = "Admin"
 
 [storage]
-enabled = true
+# Disabled for the MVP dev profile: no file upload in the core sale/expense/receipt flow.
+enabled = false
 # The maximum file size allowed (e.g. "5MB", "500KB").
 file_size_limit = "50MiB"
 
@@ -371,7 +373,8 @@ authorization_url_path = "/oauth/consent"
 allow_dynamic_registration = false
 
 [edge_runtime]
-enabled = true
+# Disabled: this project runs its API on NestJS, not Supabase Edge Functions.
+enabled = false
 # Supported request policies: `oneshot`, `per_worker`.
 # `per_worker` (default) — enables hot reload during local development.
 # `oneshot` — fallback mode if hot reload causes issues (e.g. in large repos or with symlinks).
@@ -385,7 +388,9 @@ deno_version = 2
 # secret_key = "env(SECRET_VALUE)"
 
 [analytics]
-enabled = true
+# Disabled for the MVP dev profile. This also removes the Vector log shipper, which
+# crash-loops on Windows Docker Desktop because it cannot reach the Docker socket.
+enabled = false
 port = 54327
 # Configure one of the supported backends: `postgres`, `bigquery`.
 backend = "postgres"
