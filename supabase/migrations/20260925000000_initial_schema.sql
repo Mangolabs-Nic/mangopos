@@ -187,8 +187,13 @@ ALTER TABLE public.audit_log        ENABLE ROW LEVEL SECURITY;
 CREATE POLICY businesses_own ON public.businesses
     FOR ALL USING (id = public.current_business_id());
 
+-- Read-only for clients. profiles has no user-editable column: id, business_id,
+-- email, role and active are all server-assigned by handle_new_user(), and every
+-- other tenant policy resolves tenancy through public.current_business_id(),
+-- which reads profiles.business_id. A client that could UPDATE its own row would
+-- set role = 'admin' or repoint business_id into another tenant.
 CREATE POLICY profiles_own ON public.profiles
-    FOR ALL USING (id = auth.uid());
+    FOR SELECT USING (id = auth.uid());
 
 CREATE POLICY categories_own ON public.categories
     FOR ALL USING (business_id = public.current_business_id());

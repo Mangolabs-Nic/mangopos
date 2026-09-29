@@ -31,8 +31,9 @@ BEGIN
         (biz_a, 'Verify A', 'NIO'),
         (biz_b, 'Verify B', 'USD');
 
-    -- Joining an existing tenant must yield cashier, never admin: a client that
-    -- can pick its own role is a privilege-escalation hole.
+    -- Signup must IGNORE a client-supplied business_id. A client that could name
+    -- its own tenant would become a member of it and read all of its rows through
+    -- current_business_id(), so the metadata below is asserted to have no effect.
     INSERT INTO auth.users (id, aud, role, email, encrypted_password,
                             raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
     VALUES
@@ -43,10 +44,22 @@ BEGIN
          'b@verify.local', crypt('x', gen_salt('bf')), '{}',
          '{"business_id":"aaaaaaaa-0000-0000-0000-00000000000b"}', now(), now());
 
-    IF (SELECT role FROM public.profiles WHERE id = 'bbbbbbbb-0000-0000-0000-00000000000a') <> 'cashier' THEN
-        RAISE EXCEPTION 'FAIL signup_role: joining a tenant must grant cashier';
+    IF (SELECT business_id FROM public.profiles WHERE id = 'bbbbbbbb-0000-0000-0000-00000000000a') = biz_a THEN
+        RAISE EXCEPTION 'FAIL signup_ignores_client_tenant: signup joined the tenant the client named';
     END IF;
-    RAISE NOTICE 'PASS  signup provisions profile with role cashier';
+    RAISE NOTICE 'PASS  signup ignores the client-supplied business_id';
+
+    -- Membership of an existing tenant is server-side provisioning. The harness
+    -- runs as owner here, which is exactly the privilege that step requires.
+    UPDATE public.profiles SET business_id = biz_a, role = 'cashier'
+        WHERE id = 'bbbbbbbb-0000-0000-0000-00000000000a';
+    UPDATE public.profiles SET business_id = biz_b, role = 'cashier'
+        WHERE id = 'bbbbbbbb-0000-0000-0000-00000000000b';
+
+    IF (SELECT business_id FROM public.profiles WHERE id = 'bbbbbbbb-0000-0000-0000-00000000000a') <> biz_a THEN
+        RAISE EXCEPTION 'FAIL membership_provisioning: server-side membership did not take effect';
+    END IF;
+    RAISE NOTICE 'PASS  tenant membership is server-provisioned';
 
     IF (SELECT count(*) FROM public.payment_methods
         WHERE business_id = biz_a AND kind IN ('cash','card')) <> 2 THEN
@@ -84,6 +97,25 @@ BEGIN
     EXCEPTION WHEN insufficient_privilege THEN
         RAISE NOTICE 'PASS  client cannot forge audit entries';
     END;
+
+    -- Tenant isolation holds only while profiles.business_id and profiles.role stay
+    -- server-assigned: every other policy derives tenancy from
+    -- current_business_id(), which reads that same row.
+    BEGIN
+        UPDATE public.profiles SET role = 'admin'
+            WHERE id = 'bbbbbbbb-0000-0000-0000-00000000000a';
+        UPDATE public.profiles SET business_id = 'aaaaaaaa-0000-0000-0000-00000000000b'
+            WHERE id = 'bbbbbbbb-0000-0000-0000-00000000000a';
+    EXCEPTION WHEN others THEN
+        NULL; -- denied outright; asserted immediately below either way
+    END;
+
+    IF (SELECT role FROM public.profiles WHERE id = 'bbbbbbbb-0000-0000-0000-00000000000a') <> 'cashier'
+       OR (SELECT business_id FROM public.profiles WHERE id = 'bbbbbbbb-0000-0000-0000-00000000000a')
+          <> 'aaaaaaaa-0000-0000-0000-00000000000a' THEN
+        RAISE EXCEPTION 'FAIL profile_self_promotion: a client mutated its own role or tenant';
+    END IF;
+    RAISE NOTICE 'PASS  a client cannot promote itself or cross tenants';
 
     -- The regression this harness exists for: a SECURITY INVOKER audit trigger
     -- has its own insert rejected by the audit_log write policy, and every sale

@@ -1,8 +1,10 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module.js';
 
-// Local dev reads .env from the repo root. In deployed environments the platform
-// supplies the variables, so a missing file is expected rather than fatal.
+// process.loadEnvFile() takes no path, so it reads .env from the current working
+// directory: apps/api under the workspace scripts, /app/apps/api in the runtime
+// image. In deployed environments the platform supplies the variables, so a
+// missing file is expected rather than fatal.
 try {
   process.loadEnvFile();
 } catch {

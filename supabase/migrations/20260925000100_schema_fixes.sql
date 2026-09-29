@@ -18,9 +18,9 @@
 --   GAP-5  no customers.
 --
 -- Note on roles: role is NEVER read from client signup metadata. A client that
--- could set its own role would be a privilege-escalation hole. A user who creates
--- their own business becomes admin of it; a user joining an existing business
--- starts as cashier and must be promoted server-side.
+-- could set its own role would be a privilege-escalation hole. Self-service
+-- signup creates a new tenant and makes the signer its admin; joining an existing
+-- tenant is server-side provisioning, never a client-supplied id.
 
 -- =============================================================================
 -- FIX-3: drop the drifting tenant key
@@ -112,20 +112,17 @@ DECLARE
     target_business uuid;
     target_role     text;
 BEGIN
-    -- A supplied business_id means "joining an existing tenant": start as cashier.
-    IF NULLIF(NEW.raw_user_meta_data ->> 'business_id', '') IS NOT NULL THEN
-        target_business := (NEW.raw_user_meta_data ->> 'business_id')::uuid;
-        target_role     := 'cashier';
-    ELSE
-        -- No tenant supplied: create one and make this user its admin.
-        INSERT INTO public.businesses (name, currency)
-        VALUES (
-            COALESCE(NULLIF(NEW.raw_user_meta_data ->> 'business_name', ''), 'Negocio nuevo'),
-            COALESCE(NULLIF(NEW.raw_user_meta_data ->> 'currency', ''), 'NIO')
-        )
-        RETURNING id INTO target_business;
-        target_role := 'admin';
-    END IF;
+    -- Self-service signup always provisions a NEW tenant. Joining an existing
+    -- tenant is server-side provisioning, never client metadata: a client-supplied
+    -- business_id would let any signup name a tenant it does not belong to, and
+    -- current_business_id() would then expose that tenant's rows.
+    INSERT INTO public.businesses (name, currency)
+    VALUES (
+        COALESCE(NULLIF(NEW.raw_user_meta_data ->> 'business_name', ''), 'Negocio nuevo'),
+        COALESCE(NULLIF(NEW.raw_user_meta_data ->> 'currency', ''), 'NIO')
+    )
+    RETURNING id INTO target_business;
+    target_role := 'admin';
 
     INSERT INTO public.profiles (id, business_id, email, role)
     VALUES (NEW.id, target_business, NEW.email, target_role)
