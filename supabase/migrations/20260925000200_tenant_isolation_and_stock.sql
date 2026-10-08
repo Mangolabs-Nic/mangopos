@@ -342,10 +342,16 @@ DECLARE
     via_parts    text[];
 BEGIN
     IF via IS NOT NULL THEN
+        -- Postgres array subscripts start at 1, so [1] is the table and [2] the
+        -- column. Reading [0] yields NULL and format('%I', NULL) raises, which
+        -- would break every write to the table.
         via_parts := string_to_array(via, '.');
-        EXECUTE format('SELECT p.business_id FROM public.%I p WHERE p.id = $1', via_parts[0])
+        IF array_length(via_parts, 1) <> 2 THEN
+            RAISE EXCEPTION 'invalid tenancy reference %', via;
+        END IF;
+        EXECUTE format('SELECT p.business_id FROM public.%I p WHERE p.id = $1', via_parts[1])
             INTO row_business
-            USING NULLIF(to_jsonb(NEW) ->> via_parts[1], '')::uuid;
+            USING NULLIF(to_jsonb(NEW) ->> via_parts[2], '')::uuid;
     ELSE
         row_business := NULLIF(to_jsonb(NEW) ->> 'business_id', '')::uuid;
     END IF;
@@ -399,9 +405,13 @@ CREATE TRIGGER stock_adjustments_tenant_user
 -- FIX-8: provisioning must not leave the signup business behind
 --
 -- Self-service signup always creates a business, so reassigning that user into an
--- existing tenant used to leave an empty tenant behind for good. Remove it, but
--- only when nobody else belongs to it: a business with other profiles is real and
--- must survive.
+-- existing tenant used to leave an empty tenant behind. Remove it ONLY when it is
+-- genuinely empty.
+--
+-- "No other profile belongs to it" is not enough: products, sales, expenses,
+-- customers and the audit trail all cascade from businesses, so a shop that has
+-- traded would be destroyed along with its history. A user who signs up, runs
+-- their own shop and later takes a shift elsewhere keeps that shop.
 -- =============================================================================
 
 CREATE OR REPLACE FUNCTION public.provision_user_for_business(
@@ -437,12 +447,26 @@ BEGIN
             role        = EXCLUDED.role
     RETURNING * INTO created;
 
-    IF previous_business IS NOT NULL AND previous_business <> target_business
-       AND NOT EXISTS (
-            SELECT 1 FROM public.profiles
-            WHERE business_id = previous_business AND id <> target_user_id
-       ) THEN
-        DELETE FROM public.businesses WHERE id = previous_business;
+    IF previous_business IS NOT NULL AND previous_business <> target_business THEN
+        IF EXISTS (SELECT 1 FROM public.profiles
+                   WHERE business_id = previous_business AND id <> target_user_id) THEN
+            RAISE NOTICE 'kept previous business %: it still has members', previous_business;
+
+        ELSIF EXISTS (SELECT 1 FROM public.products  WHERE business_id = previous_business)
+           OR EXISTS (SELECT 1 FROM public.sales     WHERE business_id = previous_business)
+           OR EXISTS (SELECT 1 FROM public.expenses  WHERE business_id = previous_business)
+           OR EXISTS (SELECT 1 FROM public.customers WHERE business_id = previous_business)
+           OR EXISTS (SELECT 1 FROM public.stock_adjustments si
+                       JOIN public.products p ON p.id = si.product_id
+                      WHERE p.business_id = previous_business) THEN
+            -- A real shop. Deleting it would take its catalogue, its sales and its
+            -- audit trail with it, so it stays for an admin to settle.
+            RAISE NOTICE 'kept previous business %: it holds trading data and was not deleted',
+                previous_business;
+
+        ELSE
+            DELETE FROM public.businesses WHERE id = previous_business;
+        END IF;
     END IF;
 
     RETURN created;

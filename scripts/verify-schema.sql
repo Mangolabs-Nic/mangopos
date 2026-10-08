@@ -80,6 +80,7 @@ DECLARE
     ok boolean;
     n   integer;
     v   integer;
+    w   integer;
     au  integer;
 BEGIN
     PERFORM set_config('request.jwt.claim.sub', 'bbbbbbbb-0000-0000-0000-00000000000a', true);
@@ -175,14 +176,23 @@ BEGIN
     IF v <> 8 THEN
         RAISE EXCEPTION 'FAIL second_sale: stock is %, expected 8', v;
     END IF;
-    DELETE FROM public.sales WHERE id = 'dddddddd-0000-0000-0000-00000000000b';
+    -- A sale is never hard-deleted: voiding is the audit trail's job. Deleting
+    -- one used to cascade its lines away, and because the parent row was already
+    -- gone the trigger read its status as NULL, skipped the "already voided" guard
+    -- and returned the stock a second time.
+    BEGIN
+        DELETE FROM public.sales WHERE id = 'dddddddd-0000-0000-0000-00000000000b';
+        RAISE EXCEPTION 'FAIL hard_delete_refused: a sale was deleted instead of voided';
+    EXCEPTION WHEN check_violation THEN
+        NULL;
+    END;
     SELECT stock INTO v FROM public.products WHERE id = 'cccccccc-0000-0000-0000-00000000000a';
-    IF v <> 10 THEN
-        RAISE EXCEPTION 'FAIL cascade_delete_restores: stock is %, expected 10', v;
+    IF v <> 8 THEN
+        RAISE EXCEPTION 'FAIL hard_delete_leaves_stock: stock is % after a refused delete, expected 8', v;
     END IF;
-    RAISE NOTICE 'PASS  cascade delete of a sale restores stock';
+    RAISE NOTICE 'PASS  a sale cannot be deleted, only voided';
 
-    -- Voiding leaves sale_items in place. Deleting them afterwards must not
+    -- Voiding leaves sale_items in place. Removing them afterwards must not
     -- restore the same stock a second time.
     INSERT INTO public.sales (id, business_id, subtotal, total)
         VALUES ('dddddddd-0000-0000-0000-00000000000d',
@@ -192,10 +202,11 @@ BEGIN
                     'cccccccc-0000-0000-0000-00000000000a', 2, 50.00, 100.00);
     UPDATE public.sales SET status = 'voided', void_reason = 'verify'
         WHERE id = 'dddddddd-0000-0000-0000-00000000000d';
-    DELETE FROM public.sale_items WHERE sale_id = 'dddddddd-0000-0000-0000-00000000000d';
     SELECT stock INTO v FROM public.products WHERE id = 'cccccccc-0000-0000-0000-00000000000a';
-    IF v <> 10 THEN
-        RAISE EXCEPTION 'FAIL double_restore: stock is %, a voided sale was counted twice', v;
+    DELETE FROM public.sale_items WHERE sale_id = 'dddddddd-0000-0000-0000-00000000000d';
+    SELECT stock INTO w FROM public.products WHERE id = 'cccccccc-0000-0000-0000-00000000000a';
+    IF w <> v THEN
+        RAISE EXCEPTION 'FAIL double_restore: stock moved from % to % when a voided sale''s items were deleted', v, w;
     END IF;
     RAISE NOTICE 'PASS  deleting a voided sale''s items does not double-restore';
 
@@ -229,6 +240,196 @@ BEGIN
     ELSE
         RAISE NOTICE 'PASS  role-based RLS policies are present';
     END IF;
+END $$;
+
+-- Sale path: tenant isolation, stock integrity, audit attribution -----------
+DO $$
+DECLARE
+    biz_a uuid := 'aaaaaaaa-0000-0000-0000-00000000000a';
+    biz_b uuid := 'aaaaaaaa-0000-0000-0000-00000000000b';
+    prod_a uuid := 'cccccccc-0000-0000-0000-00000000000a';
+    prod_b uuid := 'cccccccc-0000-0000-0000-00000000000b';
+    svc_a  uuid := 'cccccccc-0000-0000-0000-00000000000c';
+    sale_1 uuid := 'dddddddd-0000-0000-0000-000000000001';
+    sale_2 uuid := 'dddddddd-0000-0000-0000-000000000002';
+    v      integer;
+    base   integer;
+BEGIN
+    INSERT INTO public.products (id, business_id, name, price, stock, is_service)
+    VALUES (svc_a, biz_a, 'Verify A service', 25.00, 0, true);
+
+    -- A sale may not carry another tenant's product. sale_items has no business_id
+    -- of its own, so this is the only place the link can be enforced.
+    INSERT INTO public.sales (id, business_id, total, status)
+    VALUES (sale_1, biz_a, 100, 'completed');
+    BEGIN
+        INSERT INTO public.sale_items (sale_id, product_id, quantity, unit_price, total)
+        VALUES (sale_1, prod_b, 1, 100, 100);
+        RAISE EXCEPTION 'FAIL cross_tenant_product: a sale consumed another tenant''s stock';
+    EXCEPTION WHEN check_violation THEN
+        RAISE NOTICE 'PASS  a sale cannot consume another tenant''s product';
+    END;
+
+    -- A foreign key must not cross a tenant either: the referenced row belongs to
+    -- its own tenant and the id alone does not prove it is the same one.
+    INSERT INTO public.categories (id, business_id, name)
+    VALUES ('eeeeeeee-0000-0000-0000-000000000001', biz_b, 'Verify B category');
+    BEGIN
+        INSERT INTO public.products (id, business_id, category_id, name, price, stock)
+        VALUES ('eeeeeeee-0000-0000-0000-000000000002', biz_a, 'eeeeeeee-0000-0000-0000-000000000001', 'Bad', 1, 1);
+        RAISE EXCEPTION 'FAIL cross_tenant_reference: a product adopted another tenant''s category';
+    EXCEPTION WHEN check_violation THEN
+        RAISE NOTICE 'PASS  a row cannot reference another tenant''s category, payment method or user';
+    END;
+
+    BEGIN
+        INSERT INTO public.sales (id, business_id, payment_method_id, total, status)
+        SELECT 'eeeeeeee-0000-0000-0000-000000000003', biz_a,
+               (SELECT id FROM public.payment_methods WHERE business_id = biz_b LIMIT 1), 1, 'completed';
+        RAISE EXCEPTION 'FAIL cross_tenant_payment_method: a sale used another tenant''s payment method';
+    EXCEPTION WHEN check_violation THEN
+        RAISE NOTICE 'PASS  a sale cannot use another tenant''s payment method';
+    END;
+
+    -- stock_adjustments resolves its tenant through the product, so the trigger
+    -- parses a 'table.column' reference. A plain write must succeed, which is what
+    -- a wrong array subscript silently broke.
+    BEGIN
+        INSERT INTO public.stock_adjustments
+            (product_id, quantity_before, adjustment, quantity_after, reason)
+        VALUES (prod_a, 10, -1, 9, 'verify');
+    EXCEPTION WHEN OTHERS THEN
+        RAISE EXCEPTION 'FAIL stock_adjustment_write: a stock adjustment could not be written: %', SQLERRM;
+    END;
+    RAISE NOTICE 'PASS  stock adjustments can be written';
+
+    -- A service has no stock to move, in either direction.
+    INSERT INTO public.sales (id, business_id, total, status) VALUES (sale_2, biz_a, 25, 'completed');
+    INSERT INTO public.sale_items (sale_id, product_id, quantity, unit_price, total)
+    VALUES (sale_2, svc_a, 1, 25, 25);
+    SELECT stock INTO v FROM public.products WHERE id = svc_a;
+    IF v <> 0 THEN
+        RAISE EXCEPTION 'FAIL service_sale: selling a service moved its stock to %', v;
+    END IF;
+    UPDATE public.sales SET status = 'voided', void_reason = 'verify' WHERE id = sale_2;
+    SELECT stock INTO v FROM public.products WHERE id = svc_a;
+    IF v <> 0 THEN
+        RAISE EXCEPTION 'FAIL service_void: voiding a service credited it with % units', v;
+    END IF;
+    RAISE NOTICE 'PASS  a service neither consumes nor regains stock';
+
+    -- A stocked sale: sell 2, edit the line to 3, void, and check every step.
+    -- Assertions are relative to the stock on hand, because the checks above have
+    -- already traded against this product inside the same transaction.
+    SELECT stock INTO base FROM public.products WHERE id = prod_a;
+
+    INSERT INTO public.sale_items (sale_id, product_id, quantity, unit_price, total)
+    VALUES (sale_1, prod_a, 2, 100, 200);
+    SELECT stock INTO v FROM public.products WHERE id = prod_a;
+    IF v <> base - 2 THEN
+        RAISE EXCEPTION 'FAIL stock_deduct: expected % after selling 2, saw %', base - 2, v;
+    END IF;
+
+    UPDATE public.sale_items SET quantity = 3 WHERE sale_id = sale_1 AND product_id = prod_a;
+    SELECT stock INTO v FROM public.products WHERE id = prod_a;
+    IF v <> base - 3 THEN
+        RAISE EXCEPTION 'FAIL stock_on_edit: expected % after editing the line to 3, saw %', base - 3, v;
+    END IF;
+    RAISE NOTICE 'PASS  editing a line quantity moves stock';
+
+    UPDATE public.sales SET status = 'voided', void_reason = 'verify' WHERE id = sale_1;
+    SELECT stock INTO v FROM public.products WHERE id = prod_a;
+    IF v <> base THEN
+        RAISE EXCEPTION 'FAIL stock_restore: expected % after voiding, saw %', base, v;
+    END IF;
+
+    -- Voiding returns stock exactly once. Deleting the sale must be refused.
+    BEGIN
+        DELETE FROM public.sales WHERE id = sale_1;
+        RAISE EXCEPTION 'FAIL sale_hard_delete: a voided sale was deleted, which restocks twice';
+    EXCEPTION WHEN check_violation THEN
+        NULL;
+    END;
+    SELECT stock INTO v FROM public.products WHERE id = prod_a;
+    IF v <> base THEN
+        RAISE EXCEPTION 'FAIL double_restore: stock became % after a refused delete, expected %', v, base;
+    END IF;
+    RAISE NOTICE 'PASS  voiding restores stock once and a sale cannot be deleted';
+END $$;
+
+-- Audit trail: attribution ----------------------------------------------------
+DO $$
+DECLARE
+    biz_a uuid := 'aaaaaaaa-0000-0000-0000-00000000000a';
+BEGIN
+    IF (SELECT count(*) FROM public.audit_log WHERE business_id IS NULL) > 0 THEN
+        RAISE EXCEPTION 'FAIL audit_tenant: % audit rows have no tenant and are invisible to every tenant',
+            (SELECT count(*) FROM public.audit_log WHERE business_id IS NULL);
+    END IF;
+    IF (SELECT count(*) FROM public.audit_log WHERE entity_id IS NULL) > 0 THEN
+        RAISE EXCEPTION 'FAIL audit_entity_id: % audit rows do not record which row changed',
+            (SELECT count(*) FROM public.audit_log WHERE entity_id IS NULL);
+    END IF;
+    IF (SELECT count(*) FROM public.audit_log WHERE business_id = biz_a) = 0 THEN
+        RAISE EXCEPTION 'FAIL audit_tenant: no audit rows were attributed to the tenant that made them';
+    END IF;
+    RAISE NOTICE 'PASS  every audit row records both the row id and its tenant';
+END $$;
+
+-- Provisioning must not destroy a tenant ---------------------------------------
+DO $$
+DECLARE
+    other_business uuid := 'aaaaaaaa-0000-0000-0000-00000000000b';
+    owner_shop     uuid;
+BEGIN
+    -- A user who signed up, traded, and is later hired elsewhere keeps their shop:
+    -- products, sales and the audit trail all cascade from a business.
+    INSERT INTO auth.users (id, aud, role, email, encrypted_password,
+                            raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+    VALUES ('ffffffff-0000-0000-0000-000000000001','authenticated','authenticated',
+            'owner@verify.local', crypt('x', gen_salt('bf')), '{}',
+            '{"business_name":"Owner shop"}', now(), now());
+
+    SELECT business_id INTO owner_shop FROM public.profiles
+     WHERE id = 'ffffffff-0000-0000-0000-000000000001';
+
+    INSERT INTO public.products (id, business_id, name, price, stock)
+    VALUES ('ffffffff-0000-0000-0000-000000000002', owner_shop, 'Owner widget', 5.00, 5);
+    INSERT INTO public.sales (id, business_id, total, status)
+    VALUES ('ffffffff-0000-0000-0000-000000000003', owner_shop, 50, 'completed');
+
+    PERFORM public.provision_user_for_business(
+        'ffffffff-0000-0000-0000-000000000001', other_business, 'cashier');
+
+    IF NOT EXISTS (SELECT 1 FROM public.businesses WHERE id = owner_shop) THEN
+        RAISE EXCEPTION 'FAIL provision_keeps_shop: the shop they built was deleted';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM public.sales WHERE id = 'ffffffff-0000-0000-0000-000000000003') THEN
+        RAISE EXCEPTION 'FAIL provision_keeps_history: their sales were deleted with the shop';
+    END IF;
+    IF (SELECT business_id FROM public.profiles
+         WHERE id = 'ffffffff-0000-0000-0000-000000000001') <> other_business THEN
+        RAISE EXCEPTION 'FAIL provision_assigns: the user was not moved to the new tenant';
+    END IF;
+    RAISE NOTICE 'PASS  hiring someone elsewhere does not destroy the shop they built';
+
+    -- A signup tenant with nothing in it is still cleaned up.
+    INSERT INTO auth.users (id, aud, role, email, encrypted_password,
+                            raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+    VALUES ('ffffffff-0000-0000-0000-000000000004','authenticated','authenticated',
+            'trial@verify.local', crypt('x', gen_salt('bf')), '{}',
+            '{"business_name":"Empty trial"}', now(), now());
+
+    SELECT business_id INTO owner_shop FROM public.profiles
+     WHERE id = 'ffffffff-0000-0000-0000-000000000004';
+
+    PERFORM public.provision_user_for_business(
+        'ffffffff-0000-0000-0000-000000000004', other_business, 'cashier');
+
+    IF EXISTS (SELECT 1 FROM public.businesses WHERE id = owner_shop) THEN
+        RAISE EXCEPTION 'FAIL provision_cleans_empty: an empty signup tenant was left behind';
+    END IF;
+    RAISE NOTICE 'PASS  an empty signup tenant is still removed on reassignment';
 END $$;
 
 ROLLBACK;
