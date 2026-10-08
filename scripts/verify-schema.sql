@@ -69,7 +69,20 @@ BEGIN
 
     INSERT INTO public.products (id, business_id, name, price, stock) VALUES
         ('cccccccc-0000-0000-0000-00000000000a', biz_a, 'Verify A product', 100.00, 10),
-        ('cccccccc-0000-0000-0000-00000000000b', biz_b, 'Verify B product', 100.00, 10);
+        ('cccccccc-0000-0000-0000-00000000000b', biz_b, 'Verify B product', 100.00, 10),
+        -- Separate products for the sale_items policy check: selling a line moves stock, and
+        -- the stock-integrity checks below count from cccccccc-...-0a, so their fixture has
+        -- to land on something else.
+        ('cccccccc-0000-0000-0000-0000000000f1', biz_a, 'Verify A line product', 100.00, 10),
+        ('cccccccc-0000-0000-0000-0000000000f2', biz_b, 'Verify B line product', 100.00, 10);
+
+    -- A ticket in each tenant, so the sale_items policy can be checked from both sides.
+    INSERT INTO public.sales (id, business_id, total, status) VALUES
+        ('eeeeeeee-0000-0000-0000-00000000000a', biz_a, 100.00, 'completed'),
+        ('eeeeeeee-0000-0000-0000-00000000000b', biz_b, 100.00, 'completed');
+    INSERT INTO public.sale_items (sale_id, product_id, quantity, unit_price, total) VALUES
+        ('eeeeeeee-0000-0000-0000-00000000000a', 'cccccccc-0000-0000-0000-0000000000f1', 1, 100.00, 100.00),
+        ('eeeeeeee-0000-0000-0000-00000000000b', 'cccccccc-0000-0000-0000-0000000000f2', 1, 100.00, 100.00);
 END $$;
 
 -- Checks that need the authenticated role -----------------------------------
@@ -87,10 +100,27 @@ BEGIN
     SET LOCAL ROLE authenticated;
 
     SELECT count(*) INTO n FROM public.products;
-    IF n <> 1 THEN
-        RAISE EXCEPTION 'FAIL tenant_isolation: expected 1 visible product, saw %', n;
+    IF n <> 2 THEN
+        RAISE EXCEPTION 'FAIL tenant_isolation: expected 2 visible products, saw %', n;
     END IF;
     RAISE NOTICE 'PASS  tenant isolation: one tenant cannot see another''s rows';
+
+    -- sale_items reached its tenant through a subquery on the parent sale. It now carries
+    -- business_id, so its policy is a direct comparison like every other tenant table and
+    -- has to hold without the subquery.
+    SELECT count(*) INTO n FROM public.sale_items;
+    IF n <> 1 THEN
+        RAISE EXCEPTION 'FAIL sale_items_isolation: expected 1 visible line, saw %', n;
+    END IF;
+
+    BEGIN
+        INSERT INTO public.sale_items (sale_id, product_id, quantity, unit_price, total)
+        VALUES ('eeeeeeee-0000-0000-0000-00000000000b', 'cccccccc-0000-0000-0000-00000000000b', 1, 100.00, 100.00);
+        RAISE EXCEPTION 'FAIL sale_items_isolation: a client added a line to another tenant''s ticket';
+    EXCEPTION WHEN insufficient_privilege THEN
+        NULL;
+    END;
+    RAISE NOTICE 'PASS  sale_items are isolated without reaching through the parent sale';
 
     BEGIN
         INSERT INTO public.audit_log (action, entity_type) VALUES ('FORGED', 'sale');
@@ -430,6 +460,69 @@ BEGIN
         RAISE EXCEPTION 'FAIL provision_cleans_empty: an empty signup tenant was left behind';
     END IF;
     RAISE NOTICE 'PASS  an empty signup tenant is still removed on reassignment';
+END $$;
+
+DO $$
+DECLARE
+    shop      uuid := 'ffffffff-0000-0000-0000-0000000000e1';
+    sold      uuid := 'ffffffff-0000-0000-0000-0000000000e2';
+    unsold    uuid := 'ffffffff-0000-0000-0000-0000000000e4';
+    ticket    uuid := 'ffffffff-0000-0000-0000-0000000000e3';
+    refused   boolean;
+    remaining integer;
+BEGIN
+    INSERT INTO public.businesses (id, name) VALUES (shop, 'Closing shop');
+    INSERT INTO public.products (id, business_id, name, stock)
+    VALUES (sold, shop, 'Sold thing', 9), (unsold, shop, 'Never sold', 3);
+    INSERT INTO public.sales (id, business_id, total, status)
+    VALUES (ticket, shop, 10, 'completed');
+    INSERT INTO public.sale_items (sale_id, product_id, quantity, unit_price, total)
+    VALUES (ticket, sold, 1, 10, 10);
+
+    -- Checked as a schema invariant rather than by behaviour. sale_items.product_id used to be
+    -- ON DELETE RESTRICT, which made closing a traded business fail - but only when Postgres
+    -- happened to delete the products before the sale lines, and it does not guarantee that
+    -- order. A behavioural check here passes roughly half the time against the very defect it
+    -- is meant to catch, so the invariant is asserted instead: nothing in public may block a
+    -- cascade, because a tenant must always be closable.
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE contype = 'f' AND confdeltype = 'r'
+          AND connamespace = 'public'::regnamespace
+    ) THEN
+        RAISE EXCEPTION 'FAIL tenant_teardown: a restrictive foreign key can block closing a business';
+    END IF;
+
+    BEGIN
+        DELETE FROM public.products WHERE id = sold;
+        refused := false;
+    EXCEPTION WHEN check_violation THEN
+        refused := true;
+    END;
+
+    IF NOT refused THEN
+        RAISE EXCEPTION 'FAIL product_with_history: a product with sales history could be deleted';
+    END IF;
+    IF (SELECT count(*) FROM public.sale_items WHERE sale_id = ticket) <> 1 THEN
+        RAISE EXCEPTION 'FAIL product_with_history: the historical sale line was rewritten';
+    END IF;
+    RAISE NOTICE 'PASS  a product with sales history cannot be deleted out of a past ticket';
+
+    DELETE FROM public.products WHERE id = unsold;
+    RAISE NOTICE 'PASS  a product that was never sold can be deleted outright';
+
+    DELETE FROM public.businesses WHERE id = shop;
+
+    SELECT (SELECT count(*) FROM public.products      WHERE business_id = shop)
+         + (SELECT count(*) FROM public.sales         WHERE business_id = shop)
+         + (SELECT count(*) FROM public.sale_items    WHERE sale_id = ticket)
+         + (SELECT count(*) FROM public.audit_log     WHERE business_id = shop)
+    INTO remaining;
+
+    IF remaining <> 0 THEN
+        RAISE EXCEPTION 'FAIL tenant_teardown: closing a business left % row(s) behind', remaining;
+    END IF;
+    RAISE NOTICE 'PASS  closing a business purges its catalogue, sales and audit trail';
 END $$;
 
 ROLLBACK;
