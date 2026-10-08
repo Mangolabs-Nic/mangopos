@@ -128,6 +128,14 @@ BEGIN
         END IF;
     END IF;
 
+    -- The row this entry describes. Needed to answer "which record changed?";
+    -- reading it from the jsonb avoids the unassigned OLD/NEW problem, since only
+    -- one of them is populated depending on the operation.
+    target_id := COALESCE(
+        NULLIF(new_json ->> 'id', '')::uuid,
+        NULLIF(old_json ->> 'id', '')::uuid
+    );
+
     -- Prefer the row's own business; it is correct even when the write came from
     -- the service key and auth.uid() is NULL.
     target_business := COALESCE(
@@ -145,6 +153,14 @@ BEGIN
         IF parent_sale IS NOT NULL THEN
             SELECT s.business_id INTO target_business FROM public.sales s WHERE s.id = parent_sale;
         END IF;
+    END IF;
+
+    -- audit_log.business_id cascades from businesses, so anything written while a
+    -- tenant is being removed is deleted again immediately - and the insert would
+    -- fail against the vanishing business. Skip it: there is nothing to audit.
+    IF target_business IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM public.businesses WHERE id = target_business) THEN
+        RETURN NULL;
     END IF;
 
     INSERT INTO public.audit_log (business_id, user_id, action, entity_type, entity_id, old_values, new_values)

@@ -22,14 +22,68 @@ const LEVELS: Record<string, number> = {
 };
 
 /**
- * Keys whose values are always masked. Anchored so that `shipping` and
- * `tokenizer` are not mistaken for `pin` and `token`.
+ * Secret detection on key names.
+ *
+ * Matching a bare substring was too eager (`shipping` contains `pin`) and
+ * matching the whole name was too strict (`accessToken`, `pinCode` and
+ * `serviceRoleKey` slipped through). Splitting the name into words handles both:
+ * camelCase, snake_case and kebab-case all reduce to the same tokens.
  */
-const SECRET_KEY = /^(?:pin|password|passwd|contrase\w*|token|secret|authorization|cookie|api[_-]?key)$/i;
+const SECRET_WORDS = new Set([
+  'pin',
+  'pins',
+  'password',
+  'passwd',
+  'pwd',
+  'token',
+  'tokens',
+  'secret',
+  'secrets',
+  'authorization',
+  'cookie',
+  'credential',
+  'credentials',
+]);
 
-/** Inline `pin=1234` / `"token": "abc"` style pairs inside free text. */
-const SECRET_INLINE =
-  /\b(pin|password|contrase\w*|token|secret|api[_-]?key|authorization)\b["']?\s*[=:]\s*["']?([^\s"',;}]+)["']?/gi;
+/** A trailing `key` counts only when qualified: `serviceRoleKey`, not `sortKey`. */
+const KEY_QUALIFIERS = new Set([
+  'api',
+  'access',
+  'auth',
+  'client',
+  'encryption',
+  'private',
+  'service',
+  'session',
+  'signing',
+]);
+
+function keyParts(key: string): string[] {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+
+export function isSecretKey(key: string): boolean {
+  const parts = keyParts(key);
+  if (parts.length === 0) return false;
+  if (parts.some((part) => SECRET_WORDS.has(part))) return true;
+  const last = parts[parts.length - 1];
+  return last === 'key' && parts.slice(0, -1).some((part) => KEY_QUALIFIERS.has(part));
+}
+
+/** `key=value`, `"key": "value"` and `` `key`: `value` `` pairs in free text. */
+const KEY_VALUE_PAIR = /(["'`]?)([A-Za-z_][\w.-]*)\1\s*([:=])\s*(["'`]?)([^\s"',;}]+)\4/g;
+
+function maskInline(text: string): string {
+  return text.replace(KEY_VALUE_PAIR, (match, open, key, separator, quote) => {
+    if (!isSecretKey(key)) return match;
+    return `${open}${key}${open}${separator}${quote}***${quote}`;
+  });
+}
 
 export interface LogRecord {
   time: string;
@@ -43,10 +97,6 @@ export interface LogRecord {
 function positiveInt(raw: string | undefined, fallback: number): number {
   const parsed = Number(raw);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function maskInline(text: string): string {
-  return text.replace(SECRET_INLINE, (_m, key: string) => `${key}=***`);
 }
 
 /** Deep-masks secret-looking values. Cycles are cut off rather than thrown. */
@@ -70,7 +120,7 @@ export function redact(value: unknown, seen = new WeakSet<object>()): unknown {
 
   const out: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-    out[key] = SECRET_KEY.test(key) ? '***' : redact(item, seen);
+    out[key] = isSecretKey(key) ? '***' : redact(item, seen);
   }
   return out;
 }

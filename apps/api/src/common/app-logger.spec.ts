@@ -16,8 +16,35 @@ describe('redact', () => {
     expect(redact('{"pin": 9911}')).not.toContain('9911');
   });
 
-  it('keeps non-secret values intact', () => {
-    expect(redact({ total: 12.5, items: ['a', 'b'] })).toEqual({ total: 12.5, items: ['a', 'b'] });
+  it.each([
+    'access_token',
+    'accessToken',
+    'refreshToken',
+    'pinCode',
+    'set-cookie',
+    'serviceRoleKey',
+    'privateKey',
+    'apiKey',
+    'client_secret',
+    'authorization',
+    'password',
+    'token',
+    'pin',
+  ])('masks the secret key %s', (key) => {
+    expect(redact({ [key]: 's3cr3t-value' })).toEqual({ [key]: '***' });
+    expect(redact(`${key}: "s3cr3t-value"`)).not.toContain('s3cr3t-value');
+  });
+
+  it.each(['shipping', 'tokenizer', 'spinning', 'sortKey', 'cacheKey', 'primaryKey', 'sku', 'moneda'])
+    ('leaves the benign key %s alone', (key) => {
+      expect(redact({ [key]: 'value-1' })).toEqual({ [key]: 'value-1' });
+      expect(redact(`${key}: value-1`)).toContain('value-1');
+    });
+
+  it('keeps plain prose untouched', () => {
+    expect(redact('venta 1234 registrada por el cajero')).toBe(
+      'venta 1234 registrada por el cajero',
+    );
   });
 
   it('survives circular references', () => {
