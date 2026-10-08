@@ -122,6 +122,34 @@ BEGIN
     END;
     RAISE NOTICE 'PASS  sale_items are isolated without reaching through the parent sale';
 
+    -- Deleting a business takes its catalogue, its sales and its audit trail with it, so
+    -- the grant on businesses is the difference between "a cashier tidied up" and a total
+    -- loss. Asserted as a refusal rather than an empty result: RLS filters silently, so
+    -- only the privilege error proves the DELETE grant is actually gone.
+    BEGIN
+        DELETE FROM public.businesses WHERE id = 'aaaaaaaa-0000-0000-0000-00000000000b';
+        RAISE EXCEPTION 'FAIL business_delete_blocked: a member deleted their own business';
+    EXCEPTION WHEN insufficient_privilege THEN
+        NULL;
+    END;
+
+    BEGIN
+        PERFORM public.close_business('aaaaaaaa-0000-0000-0000-00000000000b');
+        RAISE EXCEPTION 'FAIL close_business_is_server_only: a client closed a business';
+    EXCEPTION WHEN insufficient_privilege THEN
+        NULL;
+    END;
+
+    -- A cashier may not rename the business either. RLS filters rather than raising, so
+    -- this is asserted on the row count.
+    UPDATE public.businesses SET name = 'Renamed by a cashier'
+     WHERE id = 'aaaaaaaa-0000-0000-0000-00000000000b';
+    GET DIAGNOSTICS n = ROW_COUNT;
+    IF n <> 0 THEN
+        RAISE EXCEPTION 'FAIL business_update_admin_only: a cashier renamed the business';
+    END IF;
+    RAISE NOTICE 'PASS  a member cannot delete, close or rename a business';
+
     BEGIN
         INSERT INTO public.audit_log (action, entity_type) VALUES ('FORGED', 'sale');
         RAISE EXCEPTION 'FAIL audit_forgery_blocked: a client wrote to audit_log';
@@ -523,6 +551,47 @@ BEGIN
         RAISE EXCEPTION 'FAIL tenant_teardown: closing a business left % row(s) behind', remaining;
     END IF;
     RAISE NOTICE 'PASS  closing a business purges its catalogue, sales and audit trail';
+END $$;
+
+-- Privilege checks that need no client session ---------------------------------
+DO $$
+DECLARE
+    doomed uuid := 'ffffffff-0000-0000-0000-0000000000f1';
+BEGIN
+    -- TRUNCATE is not subject to row-level security, so holding it means being able to
+    -- empty the schema in one statement regardless of tenant - and anon holds the same
+    -- grant, so it would need no account. Asserted as a privilege invariant rather than
+    -- by attempting it, since an attempt would depend on the suite's current contents.
+    IF EXISTS (
+        SELECT 1
+          FROM information_schema.role_table_grants
+         WHERE table_schema = 'public'
+           AND grantee IN ('anon', 'authenticated')
+           AND privilege_type = 'TRUNCATE'
+    ) THEN
+        RAISE EXCEPTION 'FAIL truncate_revoked: a client role still holds TRUNCATE';
+    END IF;
+    RAISE NOTICE 'PASS  no client role can truncate the schema';
+
+    IF has_table_privilege('anon', 'public.businesses', 'DELETE')
+       OR has_table_privilege('authenticated', 'public.businesses', 'DELETE') THEN
+        RAISE EXCEPTION 'FAIL business_delete_revoked: a client role still holds DELETE on businesses';
+    END IF;
+    RAISE NOTICE 'PASS  no client role holds DELETE on businesses';
+
+    -- The server key is the one route that closes a business. PostgREST connects as the
+    -- service_role database role when the service key is used, which is what the GRANT is
+    -- checked against.
+    INSERT INTO public.businesses (id, name) VALUES (doomed, 'Server closes this one');
+    PERFORM set_config('request.jwt.claim.role', 'service_role', true);
+    SET LOCAL ROLE service_role;
+    PERFORM public.close_business(doomed);
+    RESET ROLE;
+
+    IF EXISTS (SELECT 1 FROM public.businesses WHERE id = doomed) THEN
+        RAISE EXCEPTION 'FAIL close_business_service_key: the server could not close a business';
+    END IF;
+    RAISE NOTICE 'PASS  the service key can still close a business';
 END $$;
 
 ROLLBACK;
