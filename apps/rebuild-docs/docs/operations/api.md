@@ -4,6 +4,55 @@ sidebar_position: 3
 
 # API reference
 
+## Implemented today
+
+The rest of this page is the **target** API. Only the routes below exist in the codebase
+right now (`apps/api`). Anything listed later in this document is not implemented yet.
+
+| Method | Endpoint | Auth | Description |
+| --- | --- | --- | --- |
+| GET | `/health` | none | Liveness plus whether `DATABASE_URL` is set |
+| GET | `/diagnostics` | `DIAGNOSTICS_TOKEN` | Environment summary for support |
+| GET | `/diagnostics/logs?limit=N` | `DIAGNOSTICS_TOKEN` | Downloadable log bundle |
+
+## Logging
+
+Every line is a single JSON object on **stdout**, which is what Railway and Docker collect:
+
+```json
+{"time":"2026-10-08T21:24:07.235Z","level":"log","msg":"http_request","data":{"method":"GET","path":"/health","status":200,"durationMs":3.24}}
+```
+
+| Key | Meaning |
+| --- | --- |
+| `time` | ISO-8601 timestamp |
+| `level` | `verbose` · `debug` · `log` · `warn` · `error` · `fatal` |
+| `msg` | Stable, greppable event name (never a sentence) |
+| `context` | Present when Nest supplies a class name |
+| `data` | Structured payload, already redacted |
+
+Each completed request logs one `http_request` event with method, path, status and
+duration. Every response carries an `x-request-id` header (also echoed as
+`x-request-id`) so a user-reported failure maps back to a log line. Status ≥ 400 logs at
+`warn`, ≥ 500 at `error`.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `LOG_LEVEL` | `log` | Minimum level to emit |
+| `LOG_BUFFER_SIZE` | `500` | Records kept in memory for `/diagnostics` |
+| `DIAGNOSTICS_TOKEN` | unset | When set, `/diagnostics*` requires `x-diagnostics-token` |
+
+Secrets are masked before writing: object keys matching `pin`, `password`, `token`,
+`secret`, `authorization`, `cookie` and `api_key` become `***`, and inline forms such as
+`pin=9911` or `{"token": "abc"}` are redacted in free text too.
+
+:::caution
+`/diagnostics` is **open when `DIAGNOSTICS_TOKEN` is unset**. That is acceptable on a
+developer machine but not in production — the API logs a `diagnostics_token_missing`
+warning at boot when `NODE_ENV=production` and no token is configured. Set the token
+before exposing it.
+:::
+
 ## Base URL
 
 | Environment | URL |
