@@ -13,7 +13,7 @@ COPY apps/rebuild-docs/package.json apps/rebuild-docs/
 RUN npm ci
 
 COPY apps/api apps/api
-RUN npx turbo run build --filter=@mangolabs/pos-api
+RUN npx turbo run build --filter=@mangolabs/mangopos-api
 
 # ---- runtime --------------------------------------------------------------
 # Scoped to the API workspace: the docs app keeps React and Docusaurus in
@@ -25,7 +25,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/
 COPY apps/rebuild-docs/package.json apps/rebuild-docs/
-RUN npm ci --omit=dev --workspace=@mangolabs/pos-api \
+RUN npm ci --omit=dev --workspace=@mangolabs/mangopos-api \
  && npm cache clean --force
 
 COPY --from=build /app/apps/api/dist apps/api/dist

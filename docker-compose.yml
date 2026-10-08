@@ -8,7 +8,7 @@
 #
 # which runs `supabase start` and then this file.
 
-name: pooppos
+name: mangopos
 
 services:
   api:

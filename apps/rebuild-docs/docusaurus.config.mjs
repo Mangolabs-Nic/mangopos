@@ -5,7 +5,7 @@ const projectName = process.env.PROJECT_NAME ?? 'pooppos';
 
 /** @type {import('@docusaurus/types').Config} */
 const config = {
-  title: 'MangoLabs POS Rebuild',
+  title: 'MangoPOS',
   tagline: 'A safe path from PoopPOS to a pilot-ready commercial POS.',
   favicon: 'img/mango-02.png',
   url: `https://${organizationName}.github.io`,
@@ -70,7 +70,7 @@ const config = {
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} MangoLabs.`,
+      copyright: `Copyright Â© ${new Date().getFullYear()} MangoLabs.`,
     },
     prism: {
       theme: prismThemes.github,
