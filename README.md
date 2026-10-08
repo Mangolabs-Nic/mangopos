@@ -1,4 +1,4 @@
-# pooppos
+# MangoPOS
 
 MangoLabs POS rebuild. An npm workspaces monorepo running Turborepo, containing the
 NestJS API, the Docusaurus documentation site, and the Supabase schema for the
@@ -89,9 +89,9 @@ is a one-line change each.
 ## Layout
 
 ```
-pooppos/
+MangoPOS/
 ├── apps/
-│   ├── api/                  # NestJS API (@mangolabs/pos-api)
+│   ├── api/                  # NestJS API (@mangolabs/mangopos-api)
 │   │   ├── src/
 │   │   ├── Dockerfile
 │   │   └── dist/             # build output, gitignored

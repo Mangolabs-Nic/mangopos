@@ -1,7 +1,7 @@
 import {themes as prismThemes} from 'prism-react-renderer';
 
 const organizationName = process.env.ORGANIZATION_NAME ?? 'Mangolabs-Nic';
-const projectName = process.env.PROJECT_NAME ?? 'pooppos';
+const projectName = process.env.PROJECT_NAME ?? 'mangopos';
 
 /** @type {import('@docusaurus/types').Config} */
 const config = {
@@ -45,7 +45,7 @@ const config = {
       items: [
         {type: 'docSidebar', sidebarId: 'rebuildSidebar', position: 'left', label: 'Rebuild guide'},
         {
-          href: 'https://github.com/Mangolabs-Nic/pooppos',
+          href: 'https://github.com/Mangolabs-Nic/mangopos',
           label: 'GitHub',
           position: 'right',
         },
@@ -65,7 +65,7 @@ const config = {
         {
           title: 'Project',
           items: [
-            {label: 'GitHub', href: 'https://github.com/Mangolabs-Nic/pooppos'},
+            {label: 'GitHub', href: 'https://github.com/Mangolabs-Nic/mangopos'},
             {label: 'GitHub Pages', to: '/operations/github-pages'},
           ],
         },
