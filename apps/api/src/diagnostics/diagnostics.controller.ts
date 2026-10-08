@@ -17,10 +17,12 @@ import { diagnosticsExposureWarning, diagnosticsOpen } from '../common/access-co
  * bundle.
  *
  * The summary reports *whether* configuration is present, never the value, so
- * it is safe to show. When `DIAGNOSTICS_TOKEN` is set, both routes require it
- * via the `x-diagnostics-token` header. Without a token the endpoints are open,
- * which is only acceptable on a developer machine — `warnMissingToken` makes
- * that explicit at boot.
+ * it is safe to show. The routes are closed unless `diagnosticsOpen()` allows
+ * them: either a `DIAGNOSTICS_TOKEN` is set and must be presented via the
+ * `x-diagnostics-token` header, or the routes are opened deliberately with
+ * `DIAGNOSTICS_PUBLIC` outside production. Without a token they are NOT
+ * automatically open — `assertAuthorized` refuses, and `warnMissingToken`
+ * makes that explicit at boot.
  */
 @Controller('diagnostics')
 export class DiagnosticsController {

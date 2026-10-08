@@ -26,13 +26,27 @@ export function allowedOrigins(env: NodeJS.ProcessEnv = process.env): string[] {
 }
 
 /**
+ * The only spellings that count as "on". Anything else is off.
+ *
+ * `DIAGNOSTICS_PUBLIC` is an env var, so every value arrives as a string and a
+ * plain truthiness test read `false` and `0` as true — an operator explicitly
+ * turning diagnostics OFF got the opposite. This is a security gate, so an
+ * unrecognised value must fail closed rather than open.
+ */
+const PUBLIC_TRUE = new Set(['true', '1', 'yes', 'on']);
+
+function flagEnabled(raw: string | undefined): boolean {
+  return raw !== undefined && PUBLIC_TRUE.has(raw.trim().toLowerCase());
+}
+
+/**
  * Diagnostics must be explicitly enabled when the API is not on localhost:
  * in production it is reachable from the internet, and the routes expose the
  * environment and the log export.
  */
 export function diagnosticsOpen(env: NodeJS.ProcessEnv = process.env): boolean {
   if (env.DIAGNOSTICS_TOKEN) return false; // guarded by the token
-  if (!env.DIAGNOSTICS_PUBLIC) return false;
+  if (!flagEnabled(env.DIAGNOSTICS_PUBLIC)) return false;
   return env.NODE_ENV !== 'production';
 }
 

@@ -25,6 +25,27 @@ describe('diagnosticsOpen', () => {
   it('is closed whenever a token is configured', () => {
     expect(diagnosticsOpen(env({ NODE_ENV: 'development', DIAGNOSTICS_TOKEN: 'secret' }))).toBe(false);
   });
+
+  it.each(['false', 'FALSE', '0', 'no', 'off', '', '  ', 'truthy', 'enabled', '2'])(
+    'treats DIAGNOSTICS_PUBLIC=%o as closed',
+    (value) => {
+      // A truthiness test read every one of these as true, so an operator asking
+      // for closed got an open diagnostics surface.
+      expect(diagnosticsOpen(env({ NODE_ENV: 'development', DIAGNOSTICS_PUBLIC: value }))).toBe(false);
+    },
+  );
+
+  it('is closed when DIAGNOSTICS_PUBLIC is absent', () => {
+    expect(diagnosticsOpen(env({ NODE_ENV: 'development' }))).toBe(false);
+    expect(diagnosticsOpen(env({ NODE_ENV: 'staging' }))).toBe(false);
+  });
+
+  it.each(['true', 'TRUE', 'True', '1', 'yes', 'YES', 'on', 'ON', ' true ', '\tOn\n'])(
+    'treats DIAGNOSTICS_PUBLIC=%o as open outside production',
+    (value) => {
+      expect(diagnosticsOpen(env({ NODE_ENV: 'development', DIAGNOSTICS_PUBLIC: value }))).toBe(true);
+    },
+  );
 });
 
 describe('allowedOrigins', () => {

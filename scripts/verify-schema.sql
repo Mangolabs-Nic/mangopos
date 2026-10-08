@@ -594,6 +594,119 @@ BEGIN
     RAISE NOTICE 'PASS  the service key can still close a business';
 END $$;
 
+-- Stock must agree with the lines, whichever way a line changes --------------------
+DO $$
+DECLARE
+    shop     uuid := 'aaaaaaaa-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+    stocked  uuid := 'aaaaaaaa-bbbb-bbbb-bbbb-bbbbbbbbb001';
+    spare    uuid := 'aaaaaaaa-bbbb-bbbb-bbbb-bbbbbbbbb002';
+    service  uuid := 'aaaaaaaa-bbbb-bbbb-bbbb-bbbbbbbbb003';
+    ticket   uuid := 'aaaaaaaa-bbbb-bbbb-bbbb-bbbbbbbbb010';
+    voided   uuid := 'aaaaaaaa-bbbb-bbbb-bbbb-bbbbbbbbb011';
+    other    uuid := 'aaaaaaaa-bbbb-bbbb-bbbb-bbbbbbbbb012';
+    refused  boolean;
+    stock_now integer;
+    before_move integer;
+BEGIN
+    INSERT INTO public.businesses (id, name) VALUES (shop, 'Stock shop');
+    INSERT INTO public.products (id, business_id, name, price, stock, is_service) VALUES
+        (stocked, shop, 'Stocked',   10, 10, false),
+        (spare,   shop, 'Spare',     10, 10, false),
+        (service, shop, 'Delivery',  10,  0, true);
+    INSERT INTO public.sales (id, business_id, total, subtotal, status, void_reason) VALUES
+        (ticket, shop, 30, 30, 'completed', NULL),
+        (voided, shop,  0,  0, 'voided',    'cancelled at the till'),
+        (other,  shop,  0,  0, 'completed', NULL);
+    INSERT INTO public.sale_items (sale_id, product_id, quantity, unit_price, total) VALUES
+        (ticket, stocked, 3, 10, 30);
+
+    -- Moving a line onto a service used to return early before the old product was
+    -- credited, destroying the units outright.
+    SELECT stock INTO before_move FROM public.products WHERE id = stocked;
+    UPDATE public.sale_items SET product_id = service WHERE sale_id = ticket;
+
+    SELECT stock INTO stock_now FROM public.products WHERE id = stocked;
+    IF stock_now <> before_move + 3 THEN
+        RAISE EXCEPTION 'FAIL line_to_service: expected % after moving 3 units to a service, saw %',
+            before_move + 3, stock_now;
+    END IF;
+    RAISE NOTICE 'PASS  moving a line onto a service returns the units to the old product';
+
+    -- Deleting a line does not return stock - voiding does - so a line on a sale that
+    -- still stands must not be deletable at all.
+    INSERT INTO public.sale_items (sale_id, product_id, quantity, unit_price, total)
+    VALUES (other, spare, 1, 10, 10);
+
+    BEGIN
+        DELETE FROM public.sale_items WHERE sale_id = other;
+        RAISE EXCEPTION 'FAIL line_delete_blocked: a line on a live sale was deleted';
+    EXCEPTION WHEN check_violation THEN
+        refused := true;
+    END;
+
+    IF NOT refused THEN
+        RAISE EXCEPTION 'FAIL line_delete_blocked: a line on a live sale was deleted';
+    END IF;
+    RAISE NOTICE 'PASS  a line on a sale that still stands cannot be deleted';
+
+    -- Voiding is still how units come back, and a voided sale can still be tidied.
+    SELECT stock INTO before_move FROM public.products WHERE id = spare;
+    UPDATE public.sales SET status = 'voided', void_reason = 'customer left'
+     WHERE id = other;
+    SELECT stock INTO stock_now FROM public.products WHERE id = spare;
+    IF stock_now <> before_move + 1 THEN
+        RAISE EXCEPTION 'FAIL void_restores_units: expected % after voiding, saw %',
+            before_move + 1, stock_now;
+    END IF;
+
+    DELETE FROM public.sale_items WHERE sale_id = other;
+    RAISE NOTICE 'PASS  voiding returns the units and a voided sale can still be tidied';
+
+    -- Moving a line between a live and a voided sale has to move stock with it; the
+    -- trigger used not to fire on a change of sale at all.
+    INSERT INTO public.sale_items (sale_id, product_id, quantity, unit_price, total)
+    VALUES (ticket, spare, 2, 10, 20);
+    SELECT stock INTO before_move FROM public.products WHERE id = spare;
+
+    UPDATE public.sale_items SET sale_id = voided WHERE product_id = spare;
+    SELECT stock INTO stock_now FROM public.products WHERE id = spare;
+    IF stock_now <> before_move + 2 THEN
+        RAISE EXCEPTION 'FAIL move_to_voided_sale: expected % after moving onto a voided sale, saw %',
+            before_move + 2, stock_now;
+    END IF;
+
+    UPDATE public.sale_items SET sale_id = ticket WHERE product_id = spare;
+    SELECT stock INTO stock_now FROM public.products WHERE id = spare;
+    IF stock_now <> before_move THEN
+        RAISE EXCEPTION 'FAIL move_to_live_sale: expected % after moving back onto a live sale, saw %',
+            before_move, stock_now;
+    END IF;
+    RAISE NOTICE 'PASS  moving a line between a live and a voided sale moves the units';
+
+    -- A category is a human choice, so a shop carrying only one is set up, not empty, and
+    -- provisioning must leave it alone. Payment methods are deliberately excluded from that
+    -- test: every tenant is auto-seeded with cash and card, so counting them would make every
+    -- signup tenant look configured and no empty tenant would ever be cleaned up.
+    INSERT INTO public.businesses (id, name) VALUES (other, 'Configured but unsold');
+    INSERT INTO public.categories (id, business_id, name) VALUES (spare, other, 'Bakery');
+
+    INSERT INTO auth.users (id, aud, role, email, encrypted_password,
+                            raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+    VALUES ('aaaaaaaa-bbbb-bbbb-bbbb-bbbbbbbbb020', 'authenticated', 'authenticated',
+            'configured@verify.local', crypt('x', gen_salt('bf')), '{}', '{}', now(), now());
+
+    UPDATE public.profiles SET business_id = other
+     WHERE id = 'aaaaaaaa-bbbb-bbbb-bbbb-bbbbbbbbb020';
+
+    PERFORM public.provision_user_for_business(
+        'aaaaaaaa-bbbb-bbbb-bbbb-bbbbbbbbb020', shop, 'cashier');
+
+    IF NOT EXISTS (SELECT 1 FROM public.businesses WHERE id = other) THEN
+        RAISE EXCEPTION 'FAIL provision_keeps_configured: a shop with a category was deleted';
+    END IF;
+    RAISE NOTICE 'PASS  a shop that is configured but has not sold is kept on reassignment';
+END $$;
+
 ROLLBACK;
 
 \echo '---------------------------------------------------------------'

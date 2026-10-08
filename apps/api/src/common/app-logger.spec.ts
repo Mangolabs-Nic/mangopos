@@ -77,6 +77,30 @@ describe('redact', () => {
     expect(result.name).toBe('Error');
     expect(result.message).toBe('boom');
   });
+
+  it('renders a BigInt as its decimal string instead of throwing', () => {
+    // JSON.stringify throws `Do not know how to serialize a BigInt` on this value.
+    expect(redact(9007199254740993n)).toBe('9007199254740993');
+    expect(() => JSON.stringify(redact({ orderTotal: 9007199254740993n }))).not.toThrow();
+  });
+
+  it('masks a quoted secret whose value contains spaces', () => {
+    // The value class used to stop at the first space, so the closing
+    // backreference failed and the whole alternative left the password in clear.
+    expect(redact('{"password": "correct horse battery"}')).not.toContain('correct horse');
+    expect(redact('{"password": "correct horse battery"}')).toBe('{"password": "***"}');
+    expect(redact("password: 'correct horse battery'")).toBe("password: '***'");
+    expect(redact('token="abc def ghi"')).toBe('token="***"');
+    // Unquoted values still stop at whitespace and at the delimiters.
+    expect(redact('password: hunter2 for user; next=1')).toBe('password: *** for user; next=1');
+    expect(redact('password: hunter2, user=ana')).toBe('password: ***, user=ana');
+  });
+
+  it('keeps a spaced non-secret key value intact', () => {
+    expect(redact('nombre: Negocio nuevo, total: 150.50')).toBe(
+      'nombre: Negocio nuevo, total: 150.50',
+    );
+  });
 });
 
 describe('AppLogger', () => {
@@ -192,5 +216,43 @@ describe('AppLogger', () => {
     // An unbounded buffer would exceed the capacity after a burst of writes.
     for (let i = 0; i < 600; i += 1) guarded.write('log', `burst_${i}`);
     expect(guarded.count()).toBe(500);
+  });
+
+  it('masks a secret in the message and the context, not only in data', () => {
+    logger.write('warn', 'login failed for pin=9911', undefined, 'AuthService pin=9911');
+    const record = JSON.parse(written[0]);
+    expect(record.msg).toBe('login failed for pin=***');
+    expect(record.context).toBe('AuthService pin=***');
+    expect(written[0]).not.toContain('9911');
+    expect(logger.recent(10).map((r) => r.msg)).toEqual(['login failed for pin=***']);
+  });
+
+  it('logs a BigInt payload without throwing and keeps the buffer exportable', () => {
+    // The record used to be buffered before stringify, so one BigInt poisoned the
+    // ring buffer and every later /diagnostics/logs export threw on it too.
+    expect(() => logger.warn({ orderTotal: 9007199254740993n, table: 'mesa 4' })).not.toThrow();
+
+    const record = JSON.parse(written[0]);
+    expect(record.data).toEqual([{ orderTotal: '9007199254740993', table: 'mesa 4' }]);
+
+    // Exactly what DiagnosticsController.exportLogs does with the buffer.
+    expect(() => logger.recent(100).map((r) => JSON.stringify(r)).join('\n')).not.toThrow();
+    expect(logger.count()).toBe(1);
+  });
+
+  it('drops an unserialisable record instead of throwing into the caller', () => {
+    // A getter that throws stands in for anything redact cannot survive; the
+    // point is that write() degrades rather than propagating.
+    const hostile = {
+      get boom() {
+        throw new Error('nope');
+      },
+    };
+    expect(() => logger.warn(hostile)).not.toThrow();
+    expect(logger.count()).toBe(0);
+
+    // The next write still works and the export is intact.
+    logger.log('still alive');
+    expect(() => logger.recent(100).map((r) => JSON.stringify(r)).join('\n')).not.toThrow();
   });
 });

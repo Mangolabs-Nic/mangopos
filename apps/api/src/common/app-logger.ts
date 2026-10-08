@@ -102,18 +102,30 @@ const AUTH_HEADER =
  * `key=value`, `"key": "value"` and `` `key`: `value` `` pairs in free text.
  * The key class is Unicode-aware so an accented name like `contraseña` is read
  * whole instead of stopping at the `ñ`.
+ *
+ * The value has two shapes. A quoted value may contain spaces, so
+ * `{"password": "correct horse battery"}` is read whole: the closing backreference
+ * then matches and the alternative succeeds instead of dying at the first space
+ * and leaving the secret in the clear. An unquoted value still stops at
+ * whitespace and at the `;`, `,` and `}` delimiters. The other quote characters
+ * stay excluded inside a quoted value, so a JSON value is never over-consumed.
  */
-const KEY_VALUE_PAIR = /(["'`]?)([\p{L}_][\p{L}\p{N}_.-]*)\1(\s*[:=]\s*)(["'`]?)([^\s"',;}]+)\4/gu;
+const KEY_VALUE_PAIR =
+  /(["'`]?)([\p{L}_][\p{L}\p{N}_.-]*)\1(\s*[:=]\s*)(?:(["'`])([^"'\r\n]*)\4|([^\s"',;}]+))/gu;
 
 function maskInline(text: string): string {
   const withoutAuth = text.replace(
     AUTH_HEADER,
     (_match, prefix, open, _value, close) => `${prefix}${open}***${close}`,
   );
-  return withoutAuth.replace(KEY_VALUE_PAIR, (match, open, key, separator, quote) => {
-    if (!isSecretKey(key)) return match;
-    return `${open}${key}${open}${separator}${quote}***${quote}`;
-  });
+  return withoutAuth.replace(
+    KEY_VALUE_PAIR,
+    (match, open, key, separator, quotedOpen: string | undefined) => {
+      if (!isSecretKey(key)) return match;
+      const quote = quotedOpen ?? '';
+      return `${open}${key}${open}${separator}${quote}***${quote}`;
+    },
+  );
 }
 
 export interface LogRecord {
@@ -130,9 +142,19 @@ function positiveInt(raw: string | undefined, fallback: number): number {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-/** Deep-masks secret-looking values. Cycles are cut off rather than thrown. */
+/**
+ * Deep-masks secret-looking values. Cycles are cut off rather than thrown.
+ *
+ * The result is always JSON-safe: `write()` relies on it being serialisable, so
+ * the two values `JSON.stringify` refuses are converted here rather than left to
+ * throw at the call site.
+ */
 export function redact(value: unknown, seen = new WeakSet<object>()): unknown {
   if (value === null || value === undefined) return value;
+  // A BigInt is a plain primitive, not an object, so the object branch below
+  // would return it untouched and `JSON.stringify` would throw. It reaches the
+  // logger easily (a numeric/bigint column), so it becomes its decimal string.
+  if (typeof value === 'bigint') return value.toString();
   if (typeof value === 'string') return maskInline(value);
   if (typeof value !== 'object') return value;
   if (seen.has(value)) return '[circular]';
@@ -147,7 +169,10 @@ export function redact(value: unknown, seen = new WeakSet<object>()): unknown {
     };
   }
   if (Array.isArray(value)) return value.map((item) => redact(item, seen));
-  if (value instanceof Date) return value.toISOString();
+  // An Invalid Date throws on toISOString(), which would abort the whole record.
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? String(value) : value.toISOString();
+  }
 
   const out: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
@@ -173,19 +198,40 @@ export class AppLogger implements LoggerService {
   write(level: string, msg: string, data?: unknown, context?: string, requestId?: string): void {
     if ((LEVELS[level] ?? LEVELS.log) < this.minLevel) return;
 
-    const record: LogRecord = {
-      time: new Date().toISOString(),
-      level,
-      msg,
-    };
-    if (context) record.context = context;
-    if (requestId) record.requestId = requestId;
-    if (data !== undefined) record.data = redact(data);
+    let record: LogRecord;
+    let line: string;
+    try {
+      record = {
+        time: new Date().toISOString(),
+        level,
+        // `msg` and `context` are just as log-bound as `data`: a caller that
+        // interpolates a PIN into the event name leaked it in both the buffer
+        // and stdout even though the same string in `data` was masked.
+        msg: maskInline(msg),
+      };
+      if (context) record.context = maskInline(context);
+      if (requestId) record.requestId = requestId;
+      if (data !== undefined) record.data = redact(data);
+      // Serialise BEFORE the buffer push. Pushing first left an unserialisable
+      // record in the ring buffer, so the throw broke the caller's request and
+      // every later `/diagnostics/logs` export too, until enough newer lines had
+      // arrived to age the record out.
+      line = JSON.stringify(record);
+    } catch {
+      // A payload that cannot be redacted or serialised is dropped. Failing the
+      // request that merely logged something would be a far worse outcome.
+      return;
+    }
 
     this.buffer.push(record);
     if (this.buffer.length > this.bufferSize) this.buffer.shift();
 
-    process.stdout.write(`${JSON.stringify(record)}\n`);
+    try {
+      process.stdout.write(`${line}\n`);
+    } catch {
+      // stdout can fail mid-write (EPIPE on a closed collector). Losing one line
+      // is acceptable; throwing into the call site is not.
+    }
   }
 
   /** Capacity of the in-memory ring buffer. */

@@ -12,8 +12,8 @@ right now (`apps/api`). Anything listed later in this document is not implemente
 | Method | Endpoint | Auth | Description |
 | --- | --- | --- | --- |
 | GET | `/health` | none | Liveness plus whether `DATABASE_URL` is set |
-| GET | `/diagnostics` | `DIAGNOSTICS_TOKEN` | Environment summary for support |
-| GET | `/diagnostics/logs?limit=N` | `DIAGNOSTICS_TOKEN` | Downloadable log bundle |
+| GET | `/diagnostics` | `DIAGNOSTICS_TOKEN` or `DIAGNOSTICS_PUBLIC` | Environment summary for support |
+| GET | `/diagnostics/logs?limit=N` | `DIAGNOSTICS_TOKEN` or `DIAGNOSTICS_PUBLIC` | Downloadable log bundle |
 
 ## Logging
 
@@ -40,17 +40,38 @@ duration. Every response carries an `x-request-id` header (also echoed as
 | --- | --- | --- |
 | `LOG_LEVEL` | `log` | Minimum level to emit |
 | `LOG_BUFFER_SIZE` | `500` | Records kept in memory for `/diagnostics` |
-| `DIAGNOSTICS_TOKEN` | unset | When set, `/diagnostics*` requires `x-diagnostics-token` |
+| `DIAGNOSTICS_TOKEN` | unset | When set, `/diagnostics*` requires the `x-diagnostics-token` header |
+| `DIAGNOSTICS_PUBLIC` | unset | Opens `/diagnostics*` without a token outside production |
+| `CORS_ALLOWED_ORIGINS` | see [CORS](#cors) | Comma-separated origins allowed to call the API |
 
 Secrets are masked before writing: object keys matching `pin`, `password`, `token`,
 `secret`, `authorization`, `cookie` and `api_key` become `***`, and inline forms such as
-`pin=9911` or `{"token": "abc"}` are redacted in free text too.
+`pin=9911` or `{"token": "abc"}` are redacted in free text too. The masking covers `data`,
+`msg` and `context`, so a PIN interpolated into the event name is masked too.
 
 :::caution
-`/diagnostics` is **open when `DIAGNOSTICS_TOKEN` is unset**. That is acceptable on a
-developer machine but not in production — the API logs a `diagnostics_token_missing`
-warning at boot when `NODE_ENV=production` and no token is configured. Set the token
-before exposing it.
+`/diagnostics` is **closed by default**. It answers only when one of the following holds:
+
+- `DIAGNOSTICS_TOKEN` is set, and the request carries the same value in the
+  `x-diagnostics-token` header (compared in constant time).
+- `DIAGNOSTICS_TOKEN` is unset **and** `DIAGNOSTICS_PUBLIC` is set to `true`, `1`, `yes` or
+  `on` (case-insensitive, surrounding whitespace ignored) **and** `NODE_ENV` is not
+  `production`.
+
+Anything else — an absent, empty, `false`, `0`, `no` or `off` value, or any other
+unrecognised spelling — is read as *closed*. This is a security gate, so it fails closed on
+purpose: an operator who sets `DIAGNOSTICS_PUBLIC=false` gets closed diagnostics, never open
+ones. `DIAGNOSTICS_PUBLIC` cannot open diagnostics in production under any value.
+
+A wrong token gets `401 invalid diagnostics token`; closed diagnostics get
+`401 diagnostics are disabled`. When diagnostics are unreachable at boot, the API emits one
+`warn` line:
+
+```json
+{"level":"warn","msg":"diagnostics_closed","data":{"hint":"diagnostics are closed: set DIAGNOSTICS_TOKEN to reopen them for support"}}
+```
+
+Set `DIAGNOSTICS_TOKEN` before exposing the API to support.
 :::
 
 ## Base URL
@@ -70,6 +91,35 @@ Authorization: Bearer <jwt_token>
 ```
 
 Token is obtained via Supabase Auth login endpoint.
+
+## CORS
+
+`CORS_ALLOWED_ORIGINS` is a **comma-separated** allowlist of browser origins. Spaces around
+each entry are trimmed and empty entries are dropped:
+
+```
+CORS_ALLOWED_ORIGINS=https://app.mango-labs.dev,https://admin.mango-labs.dev
+```
+
+| Value | Result |
+| --- | --- |
+| A non-empty list | Exactly those origins are allowed |
+| Unset, `NODE_ENV=production` | **Nothing** is allowed |
+| Unset, any other `NODE_ENV` | `http://localhost:5173` is allowed |
+| Set but blank or only separators (`,`) | Treated as unset, so the row above applies |
+
+The API never reflects a wildcard: `Access-Control-Allow-Origin` is only emitted for an
+origin on the list, and `credentials` is enabled, so cookies and `Authorization` headers
+travel with allowed requests.
+
+:::caution
+With no `CORS_ALLOWED_ORIGINS` set, **production allows no origin at all**, and the browser
+frontend is blocked before it ever reaches a handler — the response simply carries no
+`Access-Control-Allow-Origin` header and the request fails in the console. There is no boot
+log for this: an empty allowlist is silent, and the only exposure-related boot line is the
+`diagnostics_closed` warning above. Set `CORS_ALLOWED_ORIGINS` to the deployed frontend
+origin as part of the release.
+:::
 
 ## Endpoints
 
