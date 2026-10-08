@@ -21,8 +21,11 @@ const LEVELS: Record<string, number> = {
   fatal: 60,
 };
 
-/** Object keys whose values are always masked. */
-const SECRET_KEY = /(pin|password|contrase|token|secret|authorization|cookie|api[_-]?key)/i;
+/**
+ * Keys whose values are always masked. Anchored so that `shipping` and
+ * `tokenizer` are not mistaken for `pin` and `token`.
+ */
+const SECRET_KEY = /^(?:pin|password|passwd|contrase\w*|token|secret|authorization|cookie|api[_-]?key)$/i;
 
 /** Inline `pin=1234` / `"token": "abc"` style pairs inside free text. */
 const SECRET_INLINE =
@@ -35,6 +38,11 @@ export interface LogRecord {
   requestId?: string;
   context?: string;
   data?: unknown;
+}
+
+function positiveInt(raw: string | undefined, fallback: number): number {
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function maskInline(text: string): string {
@@ -50,7 +58,12 @@ export function redact(value: unknown, seen = new WeakSet<object>()): unknown {
   seen.add(value);
 
   if (value instanceof Error) {
-    return { name: value.name, message: maskInline(value.message), stack: value.stack };
+    return {
+      name: value.name,
+      message: maskInline(value.message),
+      // The stack repeats the message, and message args can carry a PIN.
+      stack: typeof value.stack === 'string' ? maskInline(value.stack) : value.stack,
+    };
   }
   if (Array.isArray(value)) return value.map((item) => redact(item, seen));
   if (value instanceof Date) return value.toISOString();
@@ -69,12 +82,14 @@ export class AppLogger implements LoggerService {
   private readonly minLevel: number;
 
   constructor() {
-    this.bufferSize = Number(process.env.LOG_BUFFER_SIZE ?? 500);
+    // A non-numeric value must not become NaN: `length > NaN` is always false,
+    // which would turn the bounded buffer into an unbounded one.
+    this.bufferSize = positiveInt(process.env.LOG_BUFFER_SIZE, 500);
     this.minLevel = LEVELS[process.env.LOG_LEVEL ?? 'log'] ?? LEVELS.log;
   }
 
   /** Core structured write. `msg` should be a stable, greppable event name. */
-  write(level: string, msg: string, data?: unknown, context?: string): void {
+  write(level: string, msg: string, data?: unknown, context?: string, requestId?: string): void {
     if ((LEVELS[level] ?? LEVELS.log) < this.minLevel) return;
 
     const record: LogRecord = {
@@ -83,6 +98,7 @@ export class AppLogger implements LoggerService {
       msg,
     };
     if (context) record.context = context;
+    if (requestId) record.requestId = requestId;
     if (data !== undefined) record.data = redact(data);
 
     this.buffer.push(record);
@@ -105,14 +121,36 @@ export class AppLogger implements LoggerService {
     return this.buffer.length;
   }
 
-  private nestArgs(message: unknown, optional: unknown[]): { msg: string; data?: unknown; context?: string } {
+  /**
+   * Split Nest's `(message, ...optional)` convention.
+   *
+   * Nest calls `error(message, stack, context)`, so a trailing string is the
+   * stack rather than the context. Guessing wrong silently loses the stack, so
+   * treat a multi-line string as the stack and only a single-line one as context.
+   */
+  private nestArgs(message: unknown, optional: unknown[]): {
+    msg: string;
+    data?: unknown;
+    context?: string;
+  } {
     const parts = [message, ...optional];
-    const strings = parts.filter((p): p is string => typeof p === 'string');
-    const rest = parts.filter((p) => typeof p !== 'string');
-    // Nest appends the context class name as a trailing string.
-    const context = strings.length > 1 ? strings[strings.length - 1] : undefined;
+    const strings = parts.filter((part): part is string => typeof part === 'string');
+    const rest = parts.filter((part) => typeof part !== 'string');
+
+    let stack: string | undefined;
+    let context: string | undefined;
+    for (const candidate of strings.slice(1).reverse()) {
+      if (stack === undefined && candidate.includes('\n')) stack = candidate;
+      else if (context === undefined) context = candidate;
+    }
+
     const msg = strings[0] ?? (rest.length ? String(rest[0]) : '');
-    return { msg, data: rest.length ? (rest.length === 1 ? rest[0] : rest) : undefined, context };
+    // The stack travels with the data rather than as its own field: it is the
+    // diagnostic payload, and keeping one shape means the export stays simple.
+    const data =
+      stack !== undefined || rest.length ? [stack, ...rest].filter((part) => part !== undefined) : undefined;
+
+    return { msg, data, context };
   }
 
   log(message: unknown, ...optional: unknown[]): void {
@@ -148,4 +186,22 @@ export class AppLogger implements LoggerService {
   newRequestId(): string {
     return randomUUID();
   }
+}
+
+/**
+ * Process-wide instance.
+ *
+ * Created lazily: main.ts calls process.loadEnvFile() before bootstrap(), and
+ * module evaluation happens first, so a module-level `new AppLogger()` would read
+ * LOG_LEVEL and friends before .env has been loaded.
+ *
+ * Both the logger handed to NestFactory and the injected provider resolve through
+ * here, so there is exactly one ring buffer and `/diagnostics` sees every line,
+ * including the ones Nest logs while the app is still starting.
+ */
+let instance: AppLogger | null = null;
+
+export function getAppLogger(): AppLogger {
+  instance ??= new AppLogger();
+  return instance;
 }

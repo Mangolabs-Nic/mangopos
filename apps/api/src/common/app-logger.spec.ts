@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { AppLogger, redact } from './app-logger.js';
 
 describe('redact', () => {
@@ -36,17 +36,22 @@ describe('redact', () => {
 
 describe('AppLogger', () => {
   let logger: AppLogger;
-  const written: string[] = [];
-  let originalWrite: typeof process.stdout.write;
+  let written: string[] = [];
+  // Captured once, at module scope: re-capturing inside beforeEach would capture
+  // the stub installed by the previous test and "restore" that instead.
+  const realWrite = process.stdout.write.bind(process.stdout);
 
   beforeEach(() => {
-    written.length = 0;
-    originalWrite = process.stdout.write.bind(process.stdout);
+    written = [];
     process.stdout.write = ((chunk: string) => {
       written.push(chunk);
       return true;
     }) as typeof process.stdout.write;
     logger = new AppLogger();
+  });
+
+  afterEach(() => {
+    process.stdout.write = realWrite;
   });
 
   it('emits one JSON object per line', () => {
@@ -102,7 +107,37 @@ describe('AppLogger', () => {
     expect(logger.newRequestId()).not.toBe(logger.newRequestId());
   });
 
-  it('restores stdout', () => {
-    process.stdout.write = originalWrite;
+  it('keeps the stack Nest passes to error(message, stack, context)', () => {
+    logger.error('Something failed', 'Error: kaboom\n    at SaleService.sell (/app/src/sale.js:42:9)', 'SaleService');
+    expect(written[0]).toContain('at SaleService.sell');
+    expect(JSON.parse(written[0]).context).toBe('SaleService');
+  });
+
+  it('redacts a PIN that only appears in an Error stack', () => {
+    logger.write('error', 'auth_failed', new Error('rejected pin=9911'));
+    expect(written[0]).not.toContain('9911');
+    expect(written[0]).toContain('***');
+  });
+
+  it('does not mistake shipping or tokenizer for a secret', () => {
+    expect(redact({ shipping: 'Caribe', tokenizer: 'gpt' })).toEqual({
+      shipping: 'Caribe',
+      tokenizer: 'gpt',
+    });
+  });
+
+  it('records the request id on the record', () => {
+    logger.write('log', 'http_request', { path: '/x' }, undefined, 'req-123');
+    expect(JSON.parse(written[0]).requestId).toBe('req-123');
+  });
+
+  it('falls back to the default buffer size when LOG_BUFFER_SIZE is not a number', () => {
+    process.env.LOG_BUFFER_SIZE = 'abc';
+    const guarded = new AppLogger();
+    delete process.env.LOG_BUFFER_SIZE;
+    expect(guarded.bufferCapacity).toBe(500);
+    // An unbounded buffer would exceed the capacity after a burst of writes.
+    for (let i = 0; i < 600; i += 1) guarded.write('log', `burst_${i}`);
+    expect(guarded.count()).toBe(500);
   });
 });

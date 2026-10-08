@@ -70,7 +70,7 @@ const config = {
           ],
         },
       ],
-      copyright: `Copyright Â© ${new Date().getFullYear()} MangoLabs.`,
+      copyright: `Copyright © ${new Date().getFullYear()} MangoLabs.`,
     },
     prism: {
       theme: prismThemes.github,

@@ -10,6 +10,7 @@ import {
 import type { Response } from 'express';
 import { timingSafeEqual } from 'node:crypto';
 import { AppLogger } from '../common/app-logger.js';
+import { diagnosticsExposureWarning, diagnosticsOpen } from '../common/access-control.js';
 
 /**
  * Support-facing diagnostics: environment summary plus a downloadable log
@@ -86,22 +87,26 @@ export class DiagnosticsController {
   }
 
   /**
-   * Called at boot. An open diagnostics surface in production is a real leak,
-   * so make it loud rather than silent.
+   * Called at boot. Diagnostics must never be reachable without a token outside
+   * development, so make the closed state loud rather than silent.
    */
   warnMissingToken(): void {
-    if (!process.env.DIAGNOSTICS_TOKEN && process.env.NODE_ENV === 'production') {
-      this.logger.write(
-        'warn',
-        'diagnostics_token_missing',
-        { hint: 'set DIAGNOSTICS_TOKEN before exposing /diagnostics in production' },
-      );
-    }
+    const warning = diagnosticsExposureWarning();
+    if (warning) this.logger.write('warn', 'diagnostics_closed', { hint: warning });
   }
 
+  /**
+   * Fails closed: with no `DIAGNOSTICS_TOKEN` the routes stay shut unless they
+   * are explicitly opened for a non-production environment. Previously they were
+   * simply open, which combined with a wildcard CORS header let any website read
+   * the log export.
+   */
   private assertAuthorized(token: string | undefined): void {
     const expected = process.env.DIAGNOSTICS_TOKEN;
-    if (!expected) return; // open by design on developer machines
+    if (!expected) {
+      if (diagnosticsOpen()) return;
+      throw new UnauthorizedException('diagnostics are disabled');
+    }
     const provided = Buffer.from(token ?? '', 'utf8');
     const want = Buffer.from(expected, 'utf8');
     if (provided.length !== want.length || !timingSafeEqual(provided, want)) {

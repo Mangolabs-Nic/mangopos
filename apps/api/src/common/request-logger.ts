@@ -19,12 +19,19 @@ export class RequestLogger implements NestMiddleware {
     res.on('finish', () => {
       const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
       const level = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'log';
-      this.logger.write(level, 'http_request', {
-        method: req.method,
-        path: req.originalUrl,
-        status: res.statusCode,
-        durationMs: Math.round(durationMs * 100) / 100,
-      });
+      this.logger.write(
+        level,
+        'http_request',
+        {
+          method: req.method,
+          path: req.originalUrl,
+          status: res.statusCode,
+          durationMs: Math.round(durationMs * 100) / 100,
+        },
+        undefined,
+        // Without this the id we hand the client cannot be tied back to a line.
+        requestId,
+      );
     });
 
     next();
