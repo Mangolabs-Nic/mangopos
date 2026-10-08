@@ -40,7 +40,7 @@ The pilot installation must provide:
 | [Pilot cutover](./rebuild/pilot-cutover) | Go-live, support, and rollback. |
 | [Phase 1 docs](./rebuild/phase-1/identity) | Product identity, environments, roles, migrations, auditing. |
 | [POS Features](./features/overview) | General overview and individual feature sections. |
-| [Architecture](./architecture/overview) | System context, components, deployment, and security. |
+| [Architecture](./architecture) | System context, components, deployment, and security. |
 | [Business flows](./flows/sale) | Sale, inventory, expense, and reporting processes. |
 | [Development](./operations/development) | Local setup and project structure. |
 | [Deployment](./operations/deployment) | Railway + Supabase deployment guide. |
