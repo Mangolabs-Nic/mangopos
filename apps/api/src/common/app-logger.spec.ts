@@ -25,6 +25,11 @@ describe('redact', () => {
     'serviceRoleKey',
     'privateKey',
     'apiKey',
+    'apikey',
+    'apiSecret',
+    'contraseña',
+    'contrasena',
+    'contraseña_actual',
     'client_secret',
     'authorization',
     'password',
@@ -35,11 +40,24 @@ describe('redact', () => {
     expect(redact(`${key}: "s3cr3t-value"`)).not.toContain('s3cr3t-value');
   });
 
-  it.each(['shipping', 'tokenizer', 'spinning', 'sortKey', 'cacheKey', 'primaryKey', 'sku', 'moneda'])
+  it('masks the whole credential after an Authorization header', () => {
+    expect(redact('Authorization: Bearer abc123def456')).not.toContain('abc123def456');
+    expect(redact('proxy-authorization = Basic dXNlcjpwYXNz')).not.toContain('dXNlcjpwYXNz');
+    // JSON form must stay well formed, not lose its closing quote.
+    expect(redact('{"authorization": "Bearer abc123"}')).toBe('{"authorization": "***"}');
+  });
+
+  it.each(['shipping', 'tokenizer', 'spinning', 'sortKey', 'cacheKey', 'primaryKey', 'sku', 'moneda', 'unauthorized'])
     ('leaves the benign key %s alone', (key) => {
       expect(redact({ [key]: 'value-1' })).toEqual({ [key]: 'value-1' });
       expect(redact(`${key}: value-1`)).toContain('value-1');
     });
+
+  it('does not mask Spanish business text', () => {
+    expect(redact('moneda: NIO, nombre: Negocio nuevo, total: 150.50')).toBe(
+      'moneda: NIO, nombre: Negocio nuevo, total: 150.50',
+    );
+  });
 
   it('keeps plain prose untouched', () => {
     expect(redact('venta 1234 registrada por el cajero')).toBe(

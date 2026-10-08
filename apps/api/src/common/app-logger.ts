@@ -35,6 +35,7 @@ const SECRET_WORDS = new Set([
   'password',
   'passwd',
   'pwd',
+  'contrasena',
   'token',
   'tokens',
   'secret',
@@ -44,6 +45,13 @@ const SECRET_WORDS = new Set([
   'credential',
   'credentials',
 ]);
+
+/**
+ * A qualifier glued to a secret word without a separator: `apikey`, `apiSecret`,
+ * `accessToken`. After camelCase splitting only the all-lowercase forms reach here.
+ */
+const QUALIFIED_SECRET =
+  /^(?:api|access|private|service|client|session|auth|signing|encryption|refresh|id)(?:key|secret|token|password|pin|credential)s?$/;
 
 /** A trailing `key` counts only when qualified: `serviceRoleKey`, not `sortKey`. */
 const KEY_QUALIFIERS = new Set([
@@ -59,27 +67,50 @@ const KEY_QUALIFIERS = new Set([
 ]);
 
 function keyParts(key: string): string[] {
-  return key
-    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
-    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean);
+  return (
+    key
+      // The app is Spanish, so `contraseña` is a real field name. Stripping
+      // diacritics first stops `ñ` from splitting the word in two, which would
+      // leave `contrase` and `a` - neither of them a known secret.
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '')
+      .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+      .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter(Boolean)
+  );
 }
 
 export function isSecretKey(key: string): boolean {
   const parts = keyParts(key);
   if (parts.length === 0) return false;
-  if (parts.some((part) => SECRET_WORDS.has(part))) return true;
+  if (parts.some((part) => SECRET_WORDS.has(part) || QUALIFIED_SECRET.test(part))) return true;
   const last = parts[parts.length - 1];
   return last === 'key' && parts.slice(0, -1).some((part) => KEY_QUALIFIERS.has(part));
 }
 
-/** `key=value`, `"key": "value"` and `` `key`: `value` `` pairs in free text. */
-const KEY_VALUE_PAIR = /(["'`]?)([A-Za-z_][\w.-]*)\1\s*([:=])\s*(["'`]?)([^\s"',;}]+)\4/g;
+/**
+ * `Authorization: Bearer abc` carries a scheme and then the credential, so masking
+ * only the first token after the separator would leave the token itself visible.
+ * Everything up to the end of the line is masked instead.
+ */
+const AUTH_HEADER =
+  /((?:^|[\s,{;"'`])(?:proxy-)?authorization\s*["']?\s*[:=]\s*)(["'`]?)([^\r\n;,}"'`]*)(["'`]?)/gi;
+
+/**
+ * `key=value`, `"key": "value"` and `` `key`: `value` `` pairs in free text.
+ * The key class is Unicode-aware so an accented name like `contraseña` is read
+ * whole instead of stopping at the `ñ`.
+ */
+const KEY_VALUE_PAIR = /(["'`]?)([\p{L}_][\p{L}\p{N}_.-]*)\1(\s*[:=]\s*)(["'`]?)([^\s"',;}]+)\4/gu;
 
 function maskInline(text: string): string {
-  return text.replace(KEY_VALUE_PAIR, (match, open, key, separator, quote) => {
+  const withoutAuth = text.replace(
+    AUTH_HEADER,
+    (_match, prefix, open, _value, close) => `${prefix}${open}***${close}`,
+  );
+  return withoutAuth.replace(KEY_VALUE_PAIR, (match, open, key, separator, quote) => {
     if (!isSecretKey(key)) return match;
     return `${open}${key}${open}${separator}${quote}***${quote}`;
   });
