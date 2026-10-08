@@ -317,3 +317,178 @@ DROP TRIGGER IF EXISTS sale_items_audit ON public.sale_items;
 CREATE TRIGGER sale_items_audit
     AFTER INSERT OR UPDATE OR DELETE ON public.sale_items
     FOR EACH ROW EXECUTE FUNCTION public.audit_row_change();
+
+-- =============================================================================
+-- FIX-7: a foreign key must not cross a tenant boundary
+--
+-- categories, payment_methods and profiles all carry their own business_id, but a
+-- plain REFERENCES constraint only checks that the id exists. Tenant A could
+-- therefore point a product at tenant B's category, or record a sale against
+-- tenant B's employee. The referenced rows would then be reachable by joining
+-- across tenants.
+--
+-- SECURITY DEFINER because the referenced tables have their own RLS.
+-- =============================================================================
+
+CREATE OR REPLACE FUNCTION public.enforce_tenant_reference()
+RETURNS TRIGGER AS $$
+DECLARE
+    ref_column   text := TG_ARGV[0];
+    ref_table    text := TG_ARGV[1];
+    via          text := TG_ARGV[2];  -- optional 'table.column' holding the tenancy
+    row_business uuid;
+    ref_value    uuid;
+    ref_business uuid;
+    via_parts    text[];
+BEGIN
+    IF via IS NOT NULL THEN
+        via_parts := string_to_array(via, '.');
+        EXECUTE format('SELECT p.business_id FROM public.%I p WHERE p.id = $1', via_parts[0])
+            INTO row_business
+            USING NULLIF(to_jsonb(NEW) ->> via_parts[1], '')::uuid;
+    ELSE
+        row_business := NULLIF(to_jsonb(NEW) ->> 'business_id', '')::uuid;
+    END IF;
+
+    ref_value := NULLIF(to_jsonb(NEW) ->> ref_column, '')::uuid;
+    IF row_business IS NULL OR ref_value IS NULL THEN
+        RETURN NEW;
+    END IF;
+
+    EXECUTE format('SELECT r.business_id FROM public.%I r WHERE r.id = $1', ref_table)
+        INTO ref_business USING ref_value;
+
+    IF ref_business IS DISTINCT FROM row_business THEN
+        RAISE EXCEPTION '%.% references % %, which belongs to another tenant',
+            TG_TABLE_NAME, ref_column, ref_table, ref_value
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+DROP TRIGGER IF EXISTS products_tenant_category ON public.products;
+CREATE TRIGGER products_tenant_category
+    BEFORE INSERT OR UPDATE OF category_id, business_id ON public.products
+    FOR EACH ROW EXECUTE FUNCTION public.enforce_tenant_reference('category_id', 'categories');
+
+DROP TRIGGER IF EXISTS sales_tenant_payment_method ON public.sales;
+CREATE TRIGGER sales_tenant_payment_method
+    BEFORE INSERT OR UPDATE OF payment_method_id, business_id ON public.sales
+    FOR EACH ROW EXECUTE FUNCTION public.enforce_tenant_reference('payment_method_id', 'payment_methods');
+
+DROP TRIGGER IF EXISTS sales_tenant_user ON public.sales;
+CREATE TRIGGER sales_tenant_user
+    BEFORE INSERT OR UPDATE OF user_id, business_id ON public.sales
+    FOR EACH ROW EXECUTE FUNCTION public.enforce_tenant_reference('user_id', 'profiles');
+
+DROP TRIGGER IF EXISTS expenses_tenant_user ON public.expenses;
+CREATE TRIGGER expenses_tenant_user
+    BEFORE INSERT OR UPDATE OF user_id, business_id ON public.expenses
+    FOR EACH ROW EXECUTE FUNCTION public.enforce_tenant_reference('user_id', 'profiles');
+
+-- stock_adjustments lost its own business_id in migration 002 (it used to drift),
+-- so its tenancy comes from the product it adjusts.
+DROP TRIGGER IF EXISTS stock_adjustments_tenant_user ON public.stock_adjustments;
+CREATE TRIGGER stock_adjustments_tenant_user
+    BEFORE INSERT OR UPDATE ON public.stock_adjustments
+    FOR EACH ROW EXECUTE FUNCTION public.enforce_tenant_reference('user_id', 'profiles', 'products.product_id');
+
+-- =============================================================================
+-- FIX-8: provisioning must not leave the signup business behind
+--
+-- Self-service signup always creates a business, so reassigning that user into an
+-- existing tenant used to leave an empty tenant behind for good. Remove it, but
+-- only when nobody else belongs to it: a business with other profiles is real and
+-- must survive.
+-- =============================================================================
+
+CREATE OR REPLACE FUNCTION public.provision_user_for_business(
+    target_user_id  uuid,
+    target_business uuid,
+    target_role     text DEFAULT 'cashier'
+)
+RETURNS public.profiles
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    created           public.profiles;
+    previous_business uuid;
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM public.businesses WHERE id = target_business) THEN
+        RAISE EXCEPTION 'business % does not exist', target_business;
+    END IF;
+
+    SELECT p.business_id INTO previous_business
+      FROM public.profiles p WHERE p.id = target_user_id;
+
+    INSERT INTO public.profiles (id, business_id, email, role)
+    VALUES (
+        target_user_id,
+        target_business,
+        (SELECT email FROM auth.users WHERE id = target_user_id),
+        target_role
+    )
+    ON CONFLICT (id) DO UPDATE
+        SET business_id = EXCLUDED.business_id,
+            role        = EXCLUDED.role
+    RETURNING * INTO created;
+
+    IF previous_business IS NOT NULL AND previous_business <> target_business
+       AND NOT EXISTS (
+            SELECT 1 FROM public.profiles
+            WHERE business_id = previous_business AND id <> target_user_id
+       ) THEN
+        DELETE FROM public.businesses WHERE id = previous_business;
+    END IF;
+
+    RETURN created;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.provision_user_for_business(uuid, uuid, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.provision_user_for_business(uuid, uuid, text) FROM anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.provision_user_for_business(uuid, uuid, text) TO service_role;
+
+-- =============================================================================
+-- FIX-9: voiding must not invent stock for a service
+--
+-- Selling a service moves no stock (see apply_stock_delta), so returning stock on
+-- void credited a service with units it never had - a stockless service went from
+-- 0 to 1 after being voided.
+-- =============================================================================
+
+CREATE OR REPLACE FUNCTION public.revert_stock_on_void()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF OLD.status = 'completed' AND NEW.status = 'voided' THEN
+        UPDATE public.products p
+        SET stock = p.stock + agg.qty
+        FROM (
+            SELECT product_id, SUM(quantity)::int AS qty
+            FROM public.sale_items
+            WHERE sale_id = NEW.id
+            GROUP BY product_id
+        ) agg
+        WHERE p.id = agg.product_id
+          AND p.is_service = false;
+
+    ELSIF OLD.status = 'voided' AND NEW.status = 'completed' THEN
+        UPDATE public.products p
+        SET stock = p.stock - agg.qty
+        FROM (
+            SELECT product_id, SUM(quantity)::int AS qty
+            FROM public.sale_items
+            WHERE sale_id = NEW.id
+            GROUP BY product_id
+        ) agg
+        WHERE p.id = agg.product_id
+          AND p.is_service = false;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;

@@ -148,6 +148,14 @@ describe('AppLogger', () => {
     expect(record.context).toBe('AppService');
   });
 
+  it('does not mistake the context for the message when the message is an object', () => {
+    logger.log({ orderId: 42 }, 'SalesService');
+    const record = JSON.parse(written[0]);
+    expect(record.msg).not.toBe('SalesService');
+    expect(record.context).toBe('SalesService');
+    expect(JSON.stringify(record.data)).toContain('42');
+  });
+
   it('hands out unique request ids', () => {
     expect(logger.newRequestId()).not.toBe(logger.newRequestId());
   });

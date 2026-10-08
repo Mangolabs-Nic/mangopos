@@ -24,7 +24,9 @@ async function bootstrap() {
 
   // Unhandled rejections and exceptions must be visible, not silent.
   process.on('unhandledRejection', (reason) => {
-    logger.write('error', 'unhandled_rejection', { reason: String(reason) });
+    // Pass the reason through rather than String(reason): a rejected Error would
+    // otherwise lose its stack, and String() also throws on a null-prototype object.
+    logger.write('error', 'unhandled_rejection', { reason });
   });
   process.on('uncaughtException', (error) => {
     logger.write('fatal', 'uncaught_exception', { error });

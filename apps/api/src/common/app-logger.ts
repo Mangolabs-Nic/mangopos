@@ -205,33 +205,46 @@ export class AppLogger implements LoggerService {
   /**
    * Split Nest's `(message, ...optional)` convention.
    *
-   * Nest calls `error(message, stack, context)`, so a trailing string is the
-   * stack rather than the context. Guessing wrong silently loses the stack, so
-   * treat a multi-line string as the stack and only a single-line one as context.
+   * Two shapes have to be told apart:
+   *   log('sold', 'SalesService')                  -> message, context
+   *   error('failed', 'Error: x\n at y', 'Ctx')    -> message, stack, context
+   *   log({ orderId: 42 }, 'SalesService')         -> payload, context
+   *
+   * A multi-line string is a stack. Everything after the first argument that is a
+   * string is context, and the context is never promoted to the message: an
+   * object first argument means there is no message at all.
    */
   private nestArgs(message: unknown, optional: unknown[]): {
     msg: string;
     data?: unknown;
     context?: string;
   } {
-    const parts = [message, ...optional];
-    const strings = parts.filter((part): part is string => typeof part === 'string');
-    const rest = parts.filter((part) => typeof part !== 'string');
+    const head = message;
+    const hasMessage = typeof head === 'string';
 
     let stack: string | undefined;
     let context: string | undefined;
-    for (const candidate of strings.slice(1).reverse()) {
-      if (stack === undefined && candidate.includes('\n')) stack = candidate;
-      else if (context === undefined) context = candidate;
+    const payload: unknown[] = [];
+
+    // An object first argument is the payload rather than the message, so it has
+    // to be collected too; a string one is the message and must not be.
+    if (!hasMessage) payload.push(head);
+
+    for (const part of optional) {
+      if (typeof part !== 'string') {
+        payload.push(part);
+      } else if (stack === undefined && part.includes('\n')) {
+        stack = part;
+      } else if (context === undefined) {
+        context = part;
+      }
     }
 
-    const msg = strings[0] ?? (rest.length ? String(rest[0]) : '');
+    const msg = hasMessage ? (head as string) : '<structured>';
     // The stack travels with the data rather than as its own field: it is the
     // diagnostic payload, and keeping one shape means the export stays simple.
-    const data =
-      stack !== undefined || rest.length ? [stack, ...rest].filter((part) => part !== undefined) : undefined;
-
-    return { msg, data, context };
+    const extras = [stack, ...payload].filter((part) => part !== undefined);
+    return { msg, data: extras.length > 0 ? extras : undefined, context };
   }
 
   log(message: unknown, ...optional: unknown[]): void {
