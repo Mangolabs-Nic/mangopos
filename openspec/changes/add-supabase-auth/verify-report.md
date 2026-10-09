@@ -8,6 +8,8 @@ requirements: 10/10
 scenarios: 19/19
 test_command: npx vitest run
 test_exit_code: 0
+# digest of the recorded summaries: unit 7 files / 116 tests, e2e 2 files / 5 tests
+test_output_hash: sha256:2faa735bb9a9ebe3f4da0898868ba4e37504a932c38a1f567fa445ac4db8724f
 build_command: npx tsc --noEmit -p tsconfig.build.json
 build_exit_code: 0
 build_output_hash: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
