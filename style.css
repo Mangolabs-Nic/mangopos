@@ -1,0 +1,45 @@
+/* MangoPOS design tokens — DESIGN.md §6 */
+:root {
+  /* Brand */
+  --color-navy:   #0D182A;
+  --color-ink:    #111D34;
+  --color-muted:  #526071;
+  --color-line:   #DDE3EA;
+  --color-paper:  #F7F8FA;
+  --color-orange: #FF6D00;
+  --color-mango:  #FFB100;
+  --color-green:  #27AE60;
+  --color-red:    #E74C3C;
+  --color-blue:   #3498DB;
+  --color-purple: #8E44AD;
+  --color-gold:   #F5A623;
+  --color-mint:   #2ECC71;
+  --color-mist:   #EAEFF6;
+
+  /* Semantic */
+  --bg-app:     var(--color-paper);
+  --text-body:  var(--color-ink);
+  --text-muted: var(--color-muted);
+  --border:     var(--color-line);
+  --action:     var(--color-orange);
+  --action-alt: var(--color-mango);
+  --success:    var(--color-green);
+  --danger:     var(--color-red);
+
+  /* Type */
+  --font-sans: 'Poppins', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --weight-regular: 400;
+  --weight-medium:  500;
+  --weight-bold:    700;
+
+  /* Space / shape */
+  --space-unit: 4px;
+  --radius:     8px;
+}
+
+/* Neutral base — the landing page stays dark (Navy) per theme decision */
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-navy);
+  color: var(--color-mist);
+}
