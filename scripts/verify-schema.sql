@@ -723,6 +723,57 @@ BEGIN
     END IF;
     RAISE NOTICE 'PASS  returning units returns the quantity that was deducted, not the new one';
 
+    -- A stock adjustment used to record a count and apply nothing, so the audit trail and
+    -- the stock disagreed with nothing to reconcile them. It has to move the stock.
+    --
+    -- Reset to the server first. SET LOCAL ROLE lasts to the end of the transaction rather
+    -- than the end of a DO block, so this block is still inside the client session the
+    -- earlier checks set up - and these products belong to a different tenant than that
+    -- session, which is exactly what the trigger below refuses.
+    RESET ROLE;
+
+    SELECT stock INTO before_move FROM public.products WHERE id = spare;
+    INSERT INTO public.stock_adjustments (id, product_id, quantity_before, adjustment,
+                                          quantity_after, reason)
+    VALUES ('aaaaaaaa-bbbb-bbbb-bbbb-bbbbbbbbb030', spare, before_move, 4, before_move + 4,
+            'counted the shelf');
+
+    SELECT stock INTO stock_now FROM public.products WHERE id = spare;
+    IF stock_now <> before_move + 4 THEN
+        RAISE EXCEPTION 'FAIL adjustment_applies: expected % after recording +4, saw %',
+            before_move + 4, stock_now;
+    END IF;
+
+    -- The figures the caller sends are not believed. Here the client claims a "before" of
+    -- 999; what gets stored is what was actually on the shelf.
+    SELECT quantity_before INTO stock_now FROM public.stock_adjustments
+     WHERE id = 'aaaaaaaa-bbbb-bbbb-bbbb-bbbbbbbbb030';
+    IF stock_now <> before_move THEN
+        RAISE EXCEPTION 'FAIL adjustment_records_the_truth: recorded before %, expected %',
+            stock_now, before_move;
+    END IF;
+
+    -- A count cannot invent stock that is not there.
+    BEGIN
+        INSERT INTO public.stock_adjustments (product_id, quantity_before, adjustment,
+                                              quantity_after, reason)
+        VALUES (spare, 0, -1000, -1000, 'drive it negative');
+        RAISE EXCEPTION 'FAIL adjustment_cannot_invent: a count drove stock below zero';
+    EXCEPTION WHEN check_violation THEN
+        NULL;
+    END;
+
+    -- A service has no shelf to count.
+    BEGIN
+        INSERT INTO public.stock_adjustments (product_id, quantity_before, adjustment,
+                                              quantity_after, reason)
+        VALUES (service, 0, 5, 5, 'a service has no stock');
+        RAISE EXCEPTION 'FAIL adjustment_refuses_service: a service was given stock';
+    EXCEPTION WHEN check_violation THEN
+        NULL;
+    END;
+    RAISE NOTICE 'PASS  a stock adjustment moves stock, records the truth, cannot invent stock';
+
     -- A category is a human choice, so a shop carrying only one is set up, not empty, and
     -- provisioning must leave it alone. Payment methods are deliberately excluded from that
     -- test: every tenant is auto-seeded with cash and card, so counting them would make every
