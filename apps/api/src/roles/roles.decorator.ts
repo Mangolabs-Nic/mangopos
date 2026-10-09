@@ -11,7 +11,7 @@ export const ROLES_KEY = 'roles';
  * ambiguous, and a method-level empty list would override a class-level
  * restriction and open that route to everyone.
  */
-export const Roles = (...roles: Role[]) => {
+export const Roles = (...roles: [Role, ...Role[]]) => {
   if (roles.length === 0) {
     throw new Error('@Roles() requires at least one role');
   }

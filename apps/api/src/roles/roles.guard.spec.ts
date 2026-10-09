@@ -45,8 +45,9 @@ SetMetadata(ROLES_KEY, [])(
 );
 
 describe('@Roles', () => {
-  it('rejects a call with no roles', () => {
-    expect(() => Roles()).toThrow(/at least one role/);
+  it('rejects a call with no roles at runtime (untyped callers)', () => {
+    const untyped = Roles as unknown as (...roles: unknown[]) => unknown;
+    expect(() => untyped()).toThrow(/at least one role/);
   });
 });
 
