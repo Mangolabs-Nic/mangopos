@@ -143,7 +143,7 @@ BEGIN
         NULLIF(old_json ->> 'business_id', '')::uuid
     );
 
-    -- sale_items has no business_id: reach through the parent sale, preferring the
+    -- sale_items had no business_id at this point, so reach through the parent sale, preferring the
     -- NEW value so a row that moved between sales is attributed to its new owner.
     IF target_business IS NULL AND TG_TABLE_NAME = 'sale_items' THEN
         parent_sale := COALESCE(

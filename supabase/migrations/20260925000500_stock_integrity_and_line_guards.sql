@@ -22,9 +22,9 @@
 -- 4. close_business() tested auth.role(), which only has a value when the call arrives
 --    through PostgREST carrying the service key. The API's own direct connection over
 --    DATABASE_URL has no JWT, so it always refused and the function could never be used
---    from the server that owns it. It now refuses the two client roles by name, which
---    covers both callers: a user session is refused, and both the service key and a
---    direct connection are allowed.
+--    from the server that owns it. There is no role test in the body at all now - see the
+--    comment there for why one written against current_user could never fire. The GRANT
+--    is the gate.
 --
 -- 5. The "is this business empty" test in provisioning ignored categories and payment
 --    methods, so a shop that had been set up but had not sold anything - a tax rate, a
@@ -68,8 +68,10 @@ BEGIN
     SELECT s.business_id, s.status INTO new_business, new_status
       FROM public.sales s WHERE s.id = NEW.sale_id;
 
-    -- The sale's product must belong to the sale's tenant. sale_items has no business_id
-    -- of its own, so this is the only place the link can be enforced.
+    -- sale_items carries its own business_id since 004, and sale_items_set_business()
+    -- derives it from this sale on every write, so the line can never claim another
+    -- tenant. This is the second, independent check: that the product a line names belongs
+    -- to the tenant that owns the ticket it sits on.
     IF new_business IS NULL OR NOT EXISTS (
         SELECT 1 FROM public.products p
          WHERE p.id = new_product
@@ -106,7 +108,12 @@ BEGIN
             UPDATE public.products SET stock = stock - new_qty
              WHERE id = new_product AND business_id = new_business;
         ELSIF counted_old AND NOT counted_new THEN
-            UPDATE public.products SET stock = stock + new_qty
+            -- OLD.quantity, not NEW: these are the units that were deducted, and they are
+            -- what has to come back. The two are equal unless the same statement also
+            -- changes the quantity, which is what let the wrong one sit here unnoticed: a
+            -- 3-unit line moved onto a voided sale and changed to 5 units in one statement
+            -- left stock at 12 instead of 10, inventing two units.
+            UPDATE public.products SET stock = stock + old_qty
              WHERE id = new_product AND business_id = new_business;
         ELSIF counted_new AND counted_old THEN
             UPDATE public.products SET stock = stock - (new_qty - old_qty)
@@ -180,18 +187,25 @@ CREATE TRIGGER sale_items_block_delete
 CREATE OR REPLACE FUNCTION public.close_business(target uuid)
 RETURNS void AS $$
 BEGIN
-    -- auth.role() reads the JWT role claim, so it is NULL over a direct DATABASE_URL
-    -- connection - the API's own connection - and the function could never be called
-    -- from there. Naming the two client roles instead refuses exactly the sessions that
-    -- must be refused and lets both the service key and a direct connection through.
-    IF current_user IN ('anon', 'authenticated') THEN
-        RAISE EXCEPTION 'close_business requires the service key'
-            USING ERRCODE = 'insufficient_privilege';
-    END IF;
-
+    -- No role test in the body, and that is deliberate rather than an oversight. An
+    -- earlier version had one, and it could never fire: inside a SECURITY DEFINER function
+    -- current_user is the function owner for every caller, so a check written against it
+    -- reads as postgres and always passes. session_user is no better - PostgREST reaches
+    -- the database through one connection role and sets the caller's role per request, so
+    -- neither of them is the caller. It is not worth a comment that claims a protection the
+    -- code does not give.
+    --
+    -- The gate is the GRANT below: EXECUTE is revoked from PUBLIC, anon and authenticated,
+    -- and given only to service_role. A client session never reaches the body; it gets
+    -- "permission denied for function close_business" from the privilege check. That is
+    -- also why this function can stay SECURITY DEFINER, which it must be to delete a
+    -- business - service_role bypasses row-level security, and so does the owner.
     DELETE FROM public.businesses WHERE id = target;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+REVOKE ALL ON FUNCTION public.close_business(uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.close_business(uuid) TO service_role;
 
 -- =============================================================================
 -- Provisioning: a configured shop is not an empty one
