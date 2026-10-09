@@ -38,7 +38,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npx turbo run build --filter=@mangolabs/pos-rebuild-docs
+      - run: npx turbo run build --filter=@mangolabs/mangopos-docs
 
       # Combine landing page + docs into single artifact
       - name: Assemble Pages artifact

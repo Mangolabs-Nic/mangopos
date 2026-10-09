@@ -1,5 +1,5 @@
-project: pooppos
-name: MangoLabs POS Rebuild
+project: mangopos
+name: MangoPOS
 description: Documentation site for the MangoLabs POS rebuild project
 stack:
   runtime: node
@@ -13,7 +13,7 @@ stack:
   package_manager: npm
   workspaces: true
   workspace_packages:
-    - "@mangolabs/pos-rebuild-docs"
+    - "@mangolabs/mangopos-docs"
 architecture:
   pattern: monorepo
   apps:

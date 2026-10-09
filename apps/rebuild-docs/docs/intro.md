@@ -14,9 +14,11 @@ This documentation defines the eight-week path from the inherited PoopPOS baseli
 
 ## Repository boundary
 
-This repository hosts the **PoopPOS marketing landing page** plus this documentation workspace. The landing page remains static: `index.html`, images, JSON release messages, Tailwind from a CDN, and vanilla JavaScript. It does **not** contain the desktop POS source code or its database implementation.
+This repository hosts three workspaces: the **NestJS API**, this **documentation site**, and the **versioned Postgres schema** in `supabase/migrations`. It also retains the static marketing landing page: `index.html`, images, JSON release messages, Tailwind from a CDN, and vanilla JavaScript.
 
-The rebuild therefore begins with a verified copy of the actual POS source, a technical audit, and a written license/IP decision. Do not infer the desktop stack from this landing-page repository.
+It does **not** contain the legacy desktop POS source. That code lives in a separate repository; its SQLite schema has been extracted for migration purposes and is documented under [Database](./operations/database).
+
+The rebuild therefore began with a verified copy of the actual POS source, a technical audit, and a written license/IP decision.
 
 ## Pilot outcome
 
@@ -38,7 +40,7 @@ The pilot installation must provide:
 | [Pilot cutover](./rebuild/pilot-cutover) | Go-live, support, and rollback. |
 | [Phase 1 docs](./rebuild/phase-1/identity) | Product identity, environments, roles, migrations, auditing. |
 | [POS Features](./features/overview) | General overview and individual feature sections. |
-| [Architecture](./architecture/overview) | System context, components, deployment, and security. |
+| [Architecture](./architecture) | System context, components, deployment, and security. |
 | [Business flows](./flows/sale) | Sale, inventory, expense, and reporting processes. |
 | [Development](./operations/development) | Local setup and project structure. |
 | [Deployment](./operations/deployment) | Railway + Supabase deployment guide. |

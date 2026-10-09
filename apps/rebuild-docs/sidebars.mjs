@@ -43,7 +43,7 @@ const sidebars = {
     {
       type: 'category',
       label: 'Architecture',
-      items: ['architecture/overview', 'architecture/godot-legacy'],
+      items: ['architecture', 'architecture/godot-legacy'],
     },
     {
       type: 'category',
@@ -64,6 +64,7 @@ const sidebars = {
         'operations/api',
         'operations/database',
         'operations/github-pages',
+        'operations/legacy-verification',
       ],
     },
   ],
