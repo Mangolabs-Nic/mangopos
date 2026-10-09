@@ -293,6 +293,7 @@ DO $$
 DECLARE
     total   integer;
     missing text;
+    bypass  text;
 BEGIN
     IF (SELECT count(*) FROM pg_tables
         WHERE schemaname = 'public' AND NOT rowsecurity) > 0 THEN
@@ -367,6 +368,62 @@ BEGIN
      );
     IF missing IS NOT NULL THEN
         RAISE EXCEPTION 'FAIL role_based_rls: no role gate on %', missing;
+    END IF;
+
+    -- A permissive policy ORs with the gates, so a single ungated policy that
+    -- covers a gated command switches the gate off while the check above stays
+    -- green. Assert the converse: no permissive policy may cover a gated command
+    -- on a matrix table without depending on that command's helper.
+    SELECT string_agg(q.t, ', ' ORDER BY q.t)
+      INTO bypass
+      FROM (
+          SELECT DISTINCT format('public.%s %s', e.tbl, e.cmd) AS t
+            FROM (VALUES
+                ('categories',      'INSERT', 'can_manage'),
+                ('categories',      'UPDATE', 'can_manage'),
+                ('categories',      'DELETE', 'is_admin'),
+                ('payment_methods', 'INSERT', 'can_manage'),
+                ('payment_methods', 'UPDATE', 'can_manage'),
+                ('payment_methods', 'DELETE', 'is_admin'),
+                ('products',        'INSERT', 'can_manage'),
+                ('products',        'UPDATE', 'can_manage'),
+                ('products',        'DELETE', 'is_admin'),
+                ('customers',       'INSERT', 'can_manage'),
+                ('customers',       'UPDATE', 'can_manage'),
+                ('customers',       'DELETE', 'is_admin'),
+                ('expenses',        'UPDATE', 'can_manage'),
+                ('expenses',        'DELETE', 'is_admin'),
+                ('sales',           'UPDATE', 'can_manage'),
+                ('profiles',        'SELECT', 'is_admin'),
+                ('profiles',        'UPDATE', 'is_admin')
+            ) AS e(tbl, cmd, helper)
+           WHERE EXISTS (
+               SELECT 1
+                 FROM pg_policy pol
+                 JOIN pg_class c      ON c.oid = pol.polrelid
+                 JOIN pg_namespace n  ON n.oid = c.relnamespace
+                WHERE n.nspname = 'public'
+                  AND c.relname = e.tbl
+                  AND pol.polpermissive
+                  AND (CASE pol.polcmd
+                           WHEN 'r' THEN 'SELECT' WHEN 'a' THEN 'INSERT'
+                           WHEN 'w' THEN 'UPDATE' WHEN 'd' THEN 'DELETE'
+                           WHEN '*' THEN 'ALL' END) IN (e.cmd, 'ALL')
+                  AND NOT EXISTS (
+                      SELECT 1
+                        FROM pg_depend d
+                        JOIN pg_proc p       ON p.oid = d.refobjid
+                        JOIN pg_namespace pn ON pn.oid = p.pronamespace
+                       WHERE d.classid = 'pg_policy'::regclass
+                         AND d.objid = pol.oid
+                         AND d.refclassid = 'pg_proc'::regclass
+                         AND pn.nspname = 'public'
+                         AND p.proname = e.helper
+                  )
+           )
+      ) q;
+    IF bypass IS NOT NULL THEN
+        RAISE EXCEPTION 'FAIL role_based_rls: a permissive policy bypasses the role gate on %', bypass;
     END IF;
 
     SELECT count(DISTINCT pol.oid) INTO total
