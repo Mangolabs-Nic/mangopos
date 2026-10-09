@@ -101,6 +101,21 @@ describe('redact', () => {
       'nombre: Negocio nuevo, total: 150.50',
     );
   });
+
+  it('masks a quoted secret that contains a quote of the other kind', () => {
+    // The quoted-value class excluded every quote character, so an apostrophe inside a
+    // double-quoted value ended it early, the closing backreference failed, and the whole
+    // pair was left untouched. Only the opening quote may end the value.
+    expect(redact('{"password": "it\'s secret"}')).toBe('{"password": "***"}');
+    expect(redact('{"password": "say \\"hi\\" now"}')).toBe('{"password": "***"}');
+    expect(redact("password: 'say \"hi\" now'")).toBe("password: '***'");
+    expect(redact('{"token": "a\'b c"}')).toBe('{"token": "***"}');
+
+    // Still stops at the closing quote, so two pairs on one line are handled separately.
+    expect(redact('password=\'first\' user=ana')).toBe("password='***' user=ana");
+    // And an empty value still matches.
+    expect(redact('password=""')).toBe('password="***"');
+  });
 });
 
 describe('AppLogger', () => {

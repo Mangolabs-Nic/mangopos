@@ -142,6 +142,12 @@ BEGIN
         NULL;
     END;
 
+    -- The grant is the gate. close_business() has no role test in its body and does not
+    -- need one: inside a SECURITY DEFINER function current_user is the function owner for
+    -- every caller, so such a check reads as postgres and never fires. What stops a client
+    -- is EXECUTE being revoked from PUBLIC, anon and authenticated, and this is the check
+    -- that proves it - the error arrives from the privilege check, before any statement in
+    -- the function runs.
     BEGIN
         PERFORM public.close_business('aaaaaaaa-0000-0000-0000-00000000000b');
         RAISE EXCEPTION 'FAIL close_business_is_server_only: a client closed a business';
@@ -698,7 +704,24 @@ BEGIN
             before_move, stock_now;
     END IF;
     RAISE NOTICE 'PASS  moving a line moves the units with it in both directions';
-    RAISE NOTICE 'PASS  moving a line between a live and a voided sale moves the units';
+
+    -- The units given back are the ones that were deducted, which is the OLD quantity,
+    -- not the new one. These two are equal unless the same statement also changes the
+    -- quantity, which is why the bug could sit here unnoticed: a 3-unit line moved onto a
+    -- voided sale and changed to 5 units in one statement invented 2 units of stock.
+    INSERT INTO public.sale_items (sale_id, product_id, quantity, unit_price, total)
+    VALUES (ticket, spare, 3, 10, 30);
+    SELECT stock INTO before_move FROM public.products WHERE id = spare;
+
+    UPDATE public.sale_items SET sale_id = voided, quantity = 5
+     WHERE sale_id = ticket AND product_id = spare;
+
+    SELECT stock INTO stock_now FROM public.products WHERE id = spare;
+    IF stock_now <> before_move + 3 THEN
+        RAISE EXCEPTION 'FAIL restore_uses_old_quantity: expected % after returning a 3-unit line, saw %',
+            before_move + 3, stock_now;
+    END IF;
+    RAISE NOTICE 'PASS  returning units returns the quantity that was deducted, not the new one';
 
     -- A category is a human choice, so a shop carrying only one is set up, not empty, and
     -- provisioning must leave it alone. Payment methods are deliberately excluded from that

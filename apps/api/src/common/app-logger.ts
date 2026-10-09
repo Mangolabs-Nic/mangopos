@@ -107,11 +107,19 @@ const AUTH_HEADER =
  * `{"password": "correct horse battery"}` is read whole: the closing backreference
  * then matches and the alternative succeeds instead of dying at the first space
  * and leaving the secret in the clear. An unquoted value still stops at
- * whitespace and at the `;`, `,` and `}` delimiters. The other quote characters
- * stay excluded inside a quoted value, so a JSON value is never over-consumed.
+ * whitespace and at the `;`, `,` and `}` delimiters.
+ *
+ * Inside the quotes the class excludes only the *opening* quote, not quotes in
+ * general, so `{"password": "it's secret"}` is masked rather than cut short at
+ * the apostrophe. Excluding both kinds, as an earlier version did, made the
+ * closing backreference fail and passed the value through in the clear.
+ *
+ * A backslash escapes the next character, so a JSON value carrying escaped
+ * quotes is read whole too. Without that, `{"password": "say \"hi\""}` masked
+ * the part before the escape and left the rest of the password in clear.
  */
 const KEY_VALUE_PAIR =
-  /(["'`]?)([\p{L}_][\p{L}\p{N}_.-]*)\1(\s*[:=]\s*)(?:(["'`])([^"'\r\n]*)\4|([^\s"',;}]+))/gu;
+  /(["'`]?)([\p{L}_][\p{L}\p{N}_.-]*)\1(\s*[:=]\s*)(?:(["'`])(?:\\[^\r\n]|(?!\4)[^\r\n])*\4|([^\s"',;}]+))/gu;
 
 function maskInline(text: string): string {
   const withoutAuth = text.replace(
