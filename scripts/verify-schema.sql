@@ -307,14 +307,27 @@ BEGIN
     END IF;
     RAISE NOTICE 'PASS  schema declares % foreign keys', total;
 
-    -- The defect the roles task is meant to close. Reported, not fatal, so the
-    -- harness stays usable while that work is in progress.
-    IF (SELECT count(*) FROM pg_policies
-        WHERE schemaname = 'public' AND qual ILIKE '%current_role%') = 0 THEN
-        RAISE WARNING 'role-based RLS: 0 policies reference current_role - admin, supervisor and cashier are NOT enforced';
-    ELSE
-        RAISE NOTICE 'PASS  role-based RLS policies are present';
+    -- Role matrix: the helpers ARE the enforcement, and the policies call them.
+    -- Checking for the literal `current_role` missed every policy that gates
+    -- through can_manage()/is_admin(), and only inspecting `qual` missed INSERT
+    -- gates that live in `with_check` — so this is asserted, not assumed.
+    IF (SELECT count(*) FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'public'
+          AND p.proname IN ('current_role', 'can_manage', 'is_admin')) < 3 THEN
+        RAISE EXCEPTION 'FAIL role_helpers: current_role/can_manage/is_admin are not all defined';
     END IF;
+    RAISE NOTICE 'PASS  role helpers current_role/can_manage/is_admin are defined';
+
+    SELECT count(*) INTO total FROM pg_policies
+    WHERE schemaname = 'public'
+      AND (qual ILIKE '%current_role%' OR qual ILIKE '%can_manage%' OR qual ILIKE '%is_admin%'
+           OR with_check ILIKE '%current_role%' OR with_check ILIKE '%can_manage%'
+           OR with_check ILIKE '%is_admin%');
+    IF total = 0 THEN
+        RAISE EXCEPTION 'FAIL role_based_rls: no policy references the role helpers - admin, supervisor and cashier are NOT enforced';
+    END IF;
+    RAISE NOTICE 'PASS  % policies enforce the role matrix', total;
 END $$;
 
 -- Sale path: tenant isolation, stock integrity, audit attribution -----------
