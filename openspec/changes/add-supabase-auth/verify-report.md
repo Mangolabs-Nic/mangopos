@@ -1,14 +1,12 @@
 ```yaml
 schema: gentle-ai.verify-result/v1
-evidence_revision: sha256:8f4e2a1c9b7d3e6f5a8c1d4b2e9f7a6c3d5e8f1a2b4c6d8e9f0a1b2c3d4e5f6
 verdict: pass
 blockers: 0
 critical_findings: 0
 requirements: 10/10
-scenarios: 20/20
+scenarios: 19/19
 test_command: npx vitest run
 test_exit_code: 0
-test_output_hash: sha256:7f3e2a1c9b7d3e6f5a8c1d4b2e9f7a6c3d5e8f1a2b4c6d8e9f0a1b2c3d4e5f6
 build_command: npx tsc --noEmit -p tsconfig.build.json
 build_exit_code: 0
 build_output_hash: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
@@ -78,7 +76,7 @@ Duration  1.62s
 | Public Health Route Excludes Auth | Health check reachable without a token | `auth.e2e-spec.ts > serves the public health route without a token` | ✅ COMPLIANT |
 | Public Health Route Excludes Auth | Health check still 200 with an invalid token | `jwt-auth.guard.spec.ts > lets an @Public() route through without touching the token` (guard skips entirely) | ✅ COMPLIANT |
 
-**Compliance summary**: 20/20 scenarios compliant
+**Compliance summary**: 19/19 scenarios compliant
 
 ### Correctness (Static Evidence)
 
@@ -125,7 +123,7 @@ Duration  1.62s
 No remediation was required — all tests pass on first run. The implementation matches specs and design.
 
 ### Verdict
-**PASS** — All 10 requirements and 20 scenarios verified compliant via passing tests (116 unit + 5 e2e). Build, lint, type-check, and database schema verification all clean. Guard ordering, public route exclusion, 401/403 split, and per-request role freshness all confirmed working.
+**PASS** — All 10 requirements and 19 scenarios verified compliant via passing tests (116 unit + 5 e2e). Build, lint, type-check, and database schema verification all clean. Guard ordering, public route exclusion, 401/403 split, and per-request role freshness all confirmed working.
 
 ---
 
