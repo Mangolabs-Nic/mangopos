@@ -51,7 +51,16 @@ BEGIN
 
     -- Membership of an existing tenant is server-side provisioning. The harness
     -- runs as owner here, which is exactly the privilege that step requires.
-    UPDATE public.profiles SET business_id = biz_a, role = 'cashier'
+    --
+    -- The tenant operator is an admin, because voiding a sale is a supervisor action and the
+    -- ledger checks below void sales. It cannot be a supervisor: signup makes the first
+    -- profile of a tenant an admin, and a tenant may not be left without one, so demoting
+    -- the only admin would be refused. Under the role matrix an update a role may not make
+    -- is filtered out by row-level security rather than refused - the statement succeeds,
+    -- matches no row and raises nothing, so a cashier voiding a sale looks exactly like a
+    -- successful no-op. That is why the matrix is asserted below by role, from real
+    -- sessions, rather than inferred from here.
+    UPDATE public.profiles SET business_id = biz_a, role = 'admin'
         WHERE id = 'bbbbbbbb-0000-0000-0000-00000000000a';
     UPDATE public.profiles SET business_id = biz_b, role = 'cashier'
         WHERE id = 'bbbbbbbb-0000-0000-0000-00000000000b';
@@ -169,7 +178,7 @@ BEGIN
         NULL; -- denied outright; asserted immediately below either way
     END;
 
-    IF (SELECT role FROM public.profiles WHERE id = 'bbbbbbbb-0000-0000-0000-00000000000a') <> 'cashier'
+    IF (SELECT role FROM public.profiles WHERE id = 'bbbbbbbb-0000-0000-0000-00000000000a') <> 'admin'
        OR (SELECT business_id FROM public.profiles WHERE id = 'bbbbbbbb-0000-0000-0000-00000000000a')
           <> 'aaaaaaaa-0000-0000-0000-00000000000a' THEN
         RAISE EXCEPTION 'FAIL profile_self_promotion: a client mutated its own role or tenant';
@@ -241,7 +250,9 @@ BEGIN
     BEGIN
         DELETE FROM public.sales WHERE id = 'dddddddd-0000-0000-0000-00000000000b';
         RAISE EXCEPTION 'FAIL hard_delete_refused: a sale was deleted instead of voided';
-    EXCEPTION WHEN check_violation THEN
+    EXCEPTION WHEN check_violation OR insufficient_privilege THEN
+        -- Either refusal is correct: the grant is gone, and block_hard_delete would
+        -- refuse it too. Asserted as "it did not happen", not as one specific error.
         NULL;
     END;
     SELECT stock INTO v FROM public.products WHERE id = 'cccccccc-0000-0000-0000-00000000000a';
@@ -388,6 +399,9 @@ BEGIN
         RAISE EXCEPTION 'FAIL stock_deduct: expected % after selling 2, saw %', base - 2, v;
     END IF;
 
+    -- The server may correct a line in place - a rebuild or an import does exactly that - and
+    -- the stock follows it. Clients are held to "only ever off a voided sale" by the
+    -- policies, which the role matrix block further down asserts from a real session.
     UPDATE public.sale_items SET quantity = 3 WHERE sale_id = sale_1 AND product_id = prod_a;
     SELECT stock INTO v FROM public.products WHERE id = prod_a;
     IF v <> base - 3 THEN
@@ -662,25 +676,28 @@ BEGIN
     DELETE FROM public.sale_items WHERE sale_id = other;
     RAISE NOTICE 'PASS  voiding returns the units and a voided sale can still be tidied';
 
-    -- Moving a line between a live and a voided sale has to move stock with it; the
-    -- trigger used not to fire on a change of sale at all.
+    -- Moving a line has to move stock with it; the trigger used not to fire on a change of
+    -- sale at all. The matrix holds clients to "only ever off a voided sale", which the
+    -- client-side check above proves; this asserts the accounting itself, which is what
+    -- makes the server's in-place corrections - a rebuild, an import - safe to allow.
     INSERT INTO public.sale_items (sale_id, product_id, quantity, unit_price, total)
-    VALUES (ticket, spare, 2, 10, 20);
+    VALUES (voided, spare, 2, 10, 20);
     SELECT stock INTO before_move FROM public.products WHERE id = spare;
-
-    UPDATE public.sale_items SET sale_id = voided WHERE product_id = spare;
-    SELECT stock INTO stock_now FROM public.products WHERE id = spare;
-    IF stock_now <> before_move + 2 THEN
-        RAISE EXCEPTION 'FAIL move_to_voided_sale: expected % after moving onto a voided sale, saw %',
-            before_move + 2, stock_now;
-    END IF;
 
     UPDATE public.sale_items SET sale_id = ticket WHERE product_id = spare;
     SELECT stock INTO stock_now FROM public.products WHERE id = spare;
+    IF stock_now <> before_move - 2 THEN
+        RAISE EXCEPTION 'FAIL move_to_live_sale: expected % after moving onto a live sale, saw %',
+            before_move - 2, stock_now;
+    END IF;
+
+    UPDATE public.sale_items SET sale_id = voided WHERE product_id = spare;
+    SELECT stock INTO stock_now FROM public.products WHERE id = spare;
     IF stock_now <> before_move THEN
-        RAISE EXCEPTION 'FAIL move_to_live_sale: expected % after moving back onto a live sale, saw %',
+        RAISE EXCEPTION 'FAIL move_to_voided_sale: expected % after moving onto a voided sale, saw %',
             before_move, stock_now;
     END IF;
+    RAISE NOTICE 'PASS  moving a line moves the units with it in both directions';
     RAISE NOTICE 'PASS  moving a line between a live and a voided sale moves the units';
 
     -- A category is a human choice, so a shop carrying only one is set up, not empty, and
@@ -705,6 +722,223 @@ BEGIN
         RAISE EXCEPTION 'FAIL provision_keeps_configured: a shop with a category was deleted';
     END IF;
     RAISE NOTICE 'PASS  a shop that is configured but has not sold is kept on reassignment';
+END $$;
+
+-- The role matrix, asserted from real client sessions -----------------------------
+-- Every tenant table used to have one FOR ALL policy, so a cashier could rewrite the
+-- ledger inside their own business. Each cell below is asserted by running it.
+--
+-- Two different failure shapes have to be handled. A refused INSERT trips the WITH CHECK
+-- and raises. A refused UPDATE or DELETE is filtered by USING and simply affects no rows,
+-- raising nothing at all - so those are asserted on ROW_COUNT, because "the statement
+-- succeeded" is exactly what a denial looks like.
+DO $$
+DECLARE
+    biz        uuid := 'cccccccc-dddd-dddd-dddd-000000000000';
+    u_cashier  uuid := 'cccccccc-dddd-dddd-dddd-000000000001';
+    u_super    uuid := 'cccccccc-dddd-dddd-dddd-000000000002';
+    u_admin    uuid := 'cccccccc-dddd-dddd-dddd-000000000003';
+    u_spare    uuid := 'cccccccc-dddd-dddd-dddd-000000000004';
+    priced     uuid := 'cccccccc-dddd-dddd-dddd-000000000010';
+    unsold     uuid := 'cccccccc-dddd-dddd-dddd-000000000011';
+    fresh      uuid := 'cccccccc-dddd-dddd-dddd-000000000012';
+    ticket     uuid := 'cccccccc-dddd-dddd-dddd-000000000020';
+    expense    uuid := 'cccccccc-dddd-dddd-dddd-000000000030';
+    adjust     uuid := 'cccccccc-dddd-dddd-dddd-000000000040';
+    cnt        integer;
+BEGIN
+    INSERT INTO public.businesses (id, name) VALUES (biz, 'Matrix shop');
+    INSERT INTO auth.users (id, aud, role, email, encrypted_password,
+                            raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+    VALUES (u_cashier, 'authenticated', 'authenticated', 'cashier@matrix.local',
+                crypt('x', gen_salt('bf')), '{}', '{}', now(), now()),
+           (u_super,   'authenticated', 'authenticated', 'super@matrix.local',
+                crypt('x', gen_salt('bf')), '{}', '{}', now(), now()),
+           (u_admin,   'authenticated', 'authenticated', 'admin@matrix.local',
+                crypt('x', gen_salt('bf')), '{}', '{}', now(), now()),
+           (u_spare,   'authenticated', 'authenticated', 'spare@matrix.local',
+                crypt('x', gen_salt('bf')), '{}', '{}', now(), now());
+
+    UPDATE public.profiles SET business_id = biz, role = 'cashier'    WHERE id = u_cashier;
+    UPDATE public.profiles SET business_id = biz, role = 'supervisor' WHERE id = u_super;
+    UPDATE public.profiles SET business_id = biz, role = 'admin'      WHERE id = u_admin;
+    UPDATE public.profiles SET business_id = biz, role = 'cashier'    WHERE id = u_spare;
+
+    INSERT INTO public.products (id, business_id, name, price, stock) VALUES
+        (priced, biz, 'Priced thing', 10, 5),
+        (unsold, biz, 'Never sold',   10, 5);
+
+    -- ============================ cashier =====================================
+    PERFORM set_config('request.jwt.claim.sub', u_cashier::text, true);
+    SET LOCAL ROLE authenticated;
+
+    SELECT count(*) INTO cnt FROM public.products;
+    IF cnt <> 2 THEN
+        RAISE EXCEPTION 'FAIL matrix_cashier_read: expected to read 2 products, saw %', cnt;
+    END IF;
+
+    BEGIN
+        INSERT INTO public.products (id, business_id, name, price, stock)
+        VALUES (fresh, biz, 'Cashier product', 5, 1);
+        RAISE EXCEPTION 'FAIL matrix_cashier_create: a cashier created a product';
+    EXCEPTION WHEN check_violation OR insufficient_privilege THEN
+        NULL;
+    END;
+
+    UPDATE public.products SET price = 0.01 WHERE id = priced;
+    GET DIAGNOSTICS cnt = ROW_COUNT;
+    IF cnt <> 0 THEN
+        RAISE EXCEPTION 'FAIL matrix_cashier_price: a cashier changed a price';
+    END IF;
+
+    INSERT INTO public.expenses (id, business_id, amount, category)
+    VALUES (expense, biz, 5, 'supplies');
+
+    INSERT INTO public.sales (id, business_id, subtotal, total)
+    VALUES (ticket, biz, 10, 10);
+    INSERT INTO public.sale_items (sale_id, product_id, quantity, unit_price, total)
+    VALUES (ticket, priced, 1, 10, 10);
+
+    -- The one that mattered: a completed sale is a fact, so the total is not editable
+    -- and only a supervisor or admin may void it.
+    UPDATE public.sales SET total = 0.50 WHERE id = ticket;
+    GET DIAGNOSTICS cnt = ROW_COUNT;
+    IF cnt <> 0 THEN
+        RAISE EXCEPTION 'FAIL matrix_cashier_edit_sale: a cashier rewrote a completed sale';
+    END IF;
+
+    UPDATE public.sales SET status = 'voided', void_reason = 'cashier tried' WHERE id = ticket;
+    GET DIAGNOSTICS cnt = ROW_COUNT;
+    IF cnt <> 0 THEN
+        RAISE EXCEPTION 'FAIL matrix_cashier_void: a cashier voided a sale';
+    END IF;
+
+    UPDATE public.sale_items SET quantity = 9 WHERE sale_id = ticket;
+    GET DIAGNOSTICS cnt = ROW_COUNT;
+    IF cnt <> 0 THEN
+        RAISE EXCEPTION 'FAIL matrix_cashier_edit_line: a cashier edited a line on a live sale';
+    END IF;
+
+    DELETE FROM public.products WHERE id = unsold;
+    GET DIAGNOSTICS cnt = ROW_COUNT;
+    IF cnt <> 0 THEN
+        RAISE EXCEPTION 'FAIL matrix_cashier_delete_product: a cashier deleted a product';
+    END IF;
+
+    DELETE FROM public.expenses WHERE id = expense;
+    GET DIAGNOSTICS cnt = ROW_COUNT;
+    IF cnt <> 0 THEN
+        RAISE EXCEPTION 'FAIL matrix_cashier_delete_expense: a cashier deleted an expense';
+    END IF;
+
+    INSERT INTO public.stock_adjustments (id, product_id, quantity_before, adjustment,
+                                          quantity_after, reason)
+    VALUES (adjust, priced, 5, 1, 6, 'counted the shelf');
+    -- The DELETE grant is gone, so this raises rather than filtering. Either refusal is
+    -- correct; what must not happen is the row going away.
+    BEGIN
+        DELETE FROM public.stock_adjustments WHERE id = adjust;
+        RAISE EXCEPTION 'FAIL matrix_cashier_delete_adjustment: a cashier removed a stock record';
+    EXCEPTION WHEN insufficient_privilege OR check_violation THEN
+        NULL;
+    END;
+    RAISE NOTICE 'PASS  a cashier takes a sale and records, but edits and deletes nothing';
+
+    -- ============================ supervisor ==================================
+    PERFORM set_config('request.jwt.claim.sub', u_super::text, true);
+
+    UPDATE public.products SET price = 12 WHERE id = priced;
+    GET DIAGNOSTICS cnt = ROW_COUNT;
+    IF cnt <> 1 THEN
+        RAISE EXCEPTION 'FAIL matrix_supervisor_price: a supervisor could not change a price';
+    END IF;
+
+    INSERT INTO public.products (id, business_id, name, price, stock)
+    VALUES (fresh, biz, 'Supervisor product', 5, 1);
+
+    UPDATE public.expenses SET amount = 7 WHERE id = expense;
+    GET DIAGNOSTICS cnt = ROW_COUNT;
+    IF cnt <> 1 THEN
+        RAISE EXCEPTION 'FAIL matrix_supervisor_expense: a supervisor could not correct an expense';
+    END IF;
+
+    UPDATE public.sales SET status = 'voided', void_reason = 'supervisor voided it' WHERE id = ticket;
+    GET DIAGNOSTICS cnt = ROW_COUNT;
+    IF cnt <> 1 THEN
+        RAISE EXCEPTION 'FAIL matrix_supervisor_void: a supervisor could not void a sale';
+    END IF;
+
+    -- Still not a delete: that is the admin's.
+    DELETE FROM public.products WHERE id = unsold;
+    GET DIAGNOSTICS cnt = ROW_COUNT;
+    IF cnt <> 0 THEN
+        RAISE EXCEPTION 'FAIL matrix_supervisor_delete_product: a supervisor deleted a product';
+    END IF;
+
+    UPDATE public.profiles SET role = 'admin' WHERE id = u_cashier;
+    GET DIAGNOSTICS cnt = ROW_COUNT;
+    IF cnt <> 0 THEN
+        RAISE EXCEPTION 'FAIL matrix_supervisor_role: a supervisor promoted someone';
+    END IF;
+    RAISE NOTICE 'PASS  a supervisor edits the catalogue, corrects expenses and voids sales';
+
+    -- ============================== admin =====================================
+    PERFORM set_config('request.jwt.claim.sub', u_admin::text, true);
+
+    DELETE FROM public.products WHERE id = unsold;
+    GET DIAGNOSTICS cnt = ROW_COUNT;
+    IF cnt <> 1 THEN
+        RAISE EXCEPTION 'FAIL matrix_admin_delete_product: an admin could not delete a product';
+    END IF;
+
+    DELETE FROM public.expenses WHERE id = expense;
+    GET DIAGNOSTICS cnt = ROW_COUNT;
+    IF cnt <> 1 THEN
+        RAISE EXCEPTION 'FAIL matrix_admin_delete_expense: an admin could not delete an expense';
+    END IF;
+
+    UPDATE public.profiles SET role = 'supervisor' WHERE id = u_spare;
+    GET DIAGNOSTICS cnt = ROW_COUNT;
+    IF cnt <> 1 THEN
+        RAISE EXCEPTION 'FAIL matrix_admin_role: an admin could not set a role';
+    END IF;
+
+    -- The legacy app let anyone who could edit an employee tick every box on their own
+    -- record. Nobody may change their own role, not even an admin.
+    UPDATE public.profiles SET role = 'cashier' WHERE id = u_admin;
+    GET DIAGNOSTICS cnt = ROW_COUNT;
+    IF cnt <> 0 THEN
+        RAISE EXCEPTION 'FAIL matrix_admin_own_role: an admin changed their own role';
+    END IF;
+
+    -- Demoting the last admin needs to be the actor's own row, and nobody may change their
+    -- own row, so a client cannot leave a tenant with nobody to administer it. That is why
+    -- no "keep at least one admin" rule exists in the database: it would only ever have
+    -- bitten the server, on the signup cleanup where the sole admin of a throwaway tenant
+    -- is reassigned to a real one.
+    IF (SELECT role FROM public.profiles WHERE id = u_admin) <> 'admin' THEN
+        RAISE EXCEPTION 'FAIL matrix_last_admin: the tenant lost its admin';
+    END IF;
+    RAISE NOTICE 'PASS  a client cannot leave a business without an admin';
+
+    -- The audit trail is read-only for everyone, including an admin.
+    BEGIN
+        DELETE FROM public.audit_log WHERE entity_id = ticket;
+        RAISE EXCEPTION 'FAIL matrix_admin_audit: an admin deleted an audit row';
+    EXCEPTION WHEN insufficient_privilege OR check_violation THEN
+        NULL;
+    END;
+    RAISE NOTICE 'PASS  an admin deletes the catalogue, deletes expenses and sets roles';
+
+    -- The server is trusted: service_role bypasses row-level security, so a rebuild may
+    -- still write the catalogue regardless of the matrix.
+    RESET ROLE;
+    UPDATE public.products SET price = 13 WHERE id = priced;
+    GET DIAGNOSTICS cnt = ROW_COUNT;
+    IF cnt <> 1 THEN
+        RAISE EXCEPTION 'FAIL matrix_server_write: the server could not write the catalogue';
+    END IF;
+    RAISE NOTICE 'PASS  the server is unaffected by the matrix';
 END $$;
 
 ROLLBACK;

@@ -153,6 +153,49 @@ The same applies to trigger functions that write to a protected table. A
 trigger that inserts into a table whose `INSERT` policy is closed will have its own
 write rejected. `audit_row_change()` is `SECURITY DEFINER` for that reason.
 
+## Roles
+
+A profile carries one of three roles. The legacy POS had no roles at all — only nine
+module flags, set per employee and enforced in the UI — so this matrix is new, and the
+database is the only thing enforcing it.
+
+| | cashier | supervisor | admin |
+|---|---|---|---|
+| take a sale, record an expense | yes | yes | yes |
+| record a stock adjustment | yes | yes | yes |
+| create or edit products, categories, payment methods, customers | no | yes | yes |
+| change a price or a cost | no | yes | yes |
+| correct an expense | no | yes | yes |
+| void a sale (reason required) | no | yes | yes |
+| delete a product, expense, category, payment method or customer | no | no | yes |
+| set another member's role | no | no | yes |
+| rename the business | no | no | yes |
+| edit a completed sale or one of its lines | no | no | no |
+| delete a sale, a stock adjustment, or an audit row | no | no | no |
+| close the business | server only | server only | server only |
+
+Four rules carry most of it:
+
+- **A completed sale is a fact.** It is written once, and afterwards the only permitted
+  change is the void, which needs a reason. Nobody edits a total or a line quantity.
+- **Stock is corrected by adding a row, never by removing one.** `stock_adjustments` has
+  no `DELETE` grant at all, and its `reason` is `NOT NULL`.
+- **Price and cost are `supervisor` and up.** Row-level security cannot see columns, so
+  `guard_product_pricing()` enforces this.
+- **Nobody changes their own role**, not even an admin. That is the legacy self-escalation
+  — anyone who could edit an employee could tick every permission box on their own record.
+
+Two enforcement details worth knowing before you write a trigger:
+
+- A refused `UPDATE` or `DELETE` is **filtered, not refused**: the statement succeeds and
+  affects zero rows, raising nothing. Only a failed `INSERT` trips the `WITH CHECK`. Tests
+  have to assert on `ROW_COUNT` or they will read a denial as a success.
+- The role-checking triggers are `SECURITY INVOKER` on purpose. Inside a `SECURITY DEFINER`
+  function `current_user` is the function owner, so a definer trigger cannot tell a client
+  from the server. `service_role` and a direct `DATABASE_URL` connection bypass
+  row-level security anyway, so the matrix is enforced at the client edge and the server
+  is trusted — a rebuild or an import may correct rows in place.
+
 ## Audit triggers
 
 Every sensitive operation triggers an audit log entry:
