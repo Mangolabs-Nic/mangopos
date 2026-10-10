@@ -40,8 +40,8 @@ Maps to:
 
 ### Decision: JWKS Endpoint & Docker Reachability
 
-- **Local**: `SUPABASE_URL=http://127.0.0.1:54321` → JWKS at `http://127.0.0.1:54321/auth/v1/jwks` (works on host).
-- **Container**: If API runs in Docker, `127.0.0.1` won't reach host Supabase. **Mitigation**: Document `SUPABASE_JWKS_URL` override (e.g. `http://host.docker.internal:54321/auth/v1/jwks`). Guard reads `process.env.SUPABASE_JWKS_URL ?? `${process.env.SUPABASE_URL}/auth/v1/jwks``.
+- **Local**: `SUPABASE_URL=http://127.0.0.1:54321` → JWKS at `http://127.0.0.1:54321/auth/v1/.well-known/jwks.json` (works on host; confirmed via OIDC discovery `jwks_uri`).
+- **Container**: If API runs in Docker, `127.0.0.1` won't reach host Supabase. **Mitigation**: Document `SUPABASE_JWKS_URL` override (e.g. `http://host.docker.internal:54321/auth/v1/.well-known/jwks.json`). Guard reads `process.env.SUPABASE_JWKS_URL ?? `${process.env.SUPABASE_URL}/auth/v1/.well-known/jwks.json``.
 
 ## Data Flow
 

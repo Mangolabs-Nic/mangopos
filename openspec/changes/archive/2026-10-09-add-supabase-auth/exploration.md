@@ -40,7 +40,7 @@ SUPABASE_SERVICE_KEY=sb_secret_...
 ### Approaches
 
 #### 1. **JWKS Verification + Per-Request `profiles.role` Lookup** (Recommended for MVP)
-- Use `@nestjs/jwt` with `jwks-rsa` to fetch JWKS from `SUPABASE_URL/auth/v1/jwks` (or local equivalent).
+- Use `@nestjs/jwt` with `jwks-rsa` to fetch JWKS from `SUPABASE_URL/auth/v1/.well-known/jwks.json` (or local equivalent).
 - Verify JWT signature, expiry, issuer, audience on every request.
 - After verification, extract `sub` (user UUID), query `profiles` for `role` and `business_id`, attach to `request.user`.
 - **Pros**: Always fresh role (demotion takes effect next request), no custom claims to manage, works with standard Supabase flow.
@@ -78,7 +78,7 @@ Rationale:
 - Unblocks the 8 `@Roles` tasks with the **minimum viable auth**: a global guard that verifies the Supabase-issued JWT and hydrates `request.user.appRole` from `profiles.role`.
 - No custom claims, no auth hooks, no token refresh logic — standard Supabase flow.
 - Role changes (demotion/promotion) take effect on the **next request** — matches the `RolesGuard` comment: "a demotion takes effect on the next request" (roles.guard.ts:16).
-- Local Supabase exposes JWKS at `http://127.0.0.1:54321/auth/v1/jwks` (verified in Supabase source). `jwks-rsa` caches keys in-memory automatically.
+- Local Supabase exposes JWKS at `http://127.0.0.1:54321/auth/v1/.well-known/jwks.json` (confirmed via OIDC discovery during implementation). `jwks-rsa` caches keys in-memory automatically.
 - Keep the API on the superuser connection for now — **do not close the RLS gap in this slice**. The `RolesGuard` is the authorization gate; RLS remains a defense-in-depth layer for when a frontend exists. Proportionate for local MVP.
 
 **Implementation Sketch (first slice only):**
@@ -103,4 +103,4 @@ Rationale:
 
 **Yes.** The exploration is complete. The orchestrator should tell the user:
 
-> The first slice is clear: add a NestJS global auth guard that verifies the Supabase GoTrue JWT via JWKS (local: `http://127.0.0.1:54321/auth/v1/jwks`), then hydrates `request.user.appRole` from `profiles.role` on each request. This unblocks all 8 `@Roles` tasks. Do not embed roles in JWT, do not switch off the superuser connection, and do not build a seed system yet — those are follow-up slices. Proceed to **Proposal** with this scope.
+> The first slice is clear: add a NestJS global auth guard that verifies the Supabase GoTrue JWT via JWKS (local: `http://127.0.0.1:54321/auth/v1/.well-known/jwks.json`), then hydrates `request.user.appRole` from `profiles.role` on each request. This unblocks all 8 `@Roles` tasks. Do not embed roles in JWT, do not switch off the superuser connection, and do not build a seed system yet — those are follow-up slices. Proceed to **Proposal** with this scope.

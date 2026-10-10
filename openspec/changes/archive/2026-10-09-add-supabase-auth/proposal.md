@@ -7,7 +7,7 @@ The NestJS API (`apps/api`) has zero authentication — nothing populates `reque
 ## Scope
 
 ### In Scope
-- Global JWT verification guard using `@nestjs/jwt` + `jwks-rsa` against `SUPABASE_URL/auth/v1/jwks` (issuer + `authenticated` audience + expiry)
+- Global JWT verification guard using `@nestjs/jwt` + `jwks-rsa` against `SUPABASE_URL/auth/v1/.well-known/jwks.json` (issuer + `authenticated` audience + expiry)
 - Per-request `profiles` lookup by `sub` to populate `request.user.appRole` and `businessId`
 - Guard registered globally via `APP_GUARD` in `app.module.ts` (order: auth guard before `RolesGuard`)
 - Unauthenticated/absent token → 401; unknown profile → 401
@@ -35,7 +35,7 @@ The NestJS API (`apps/api`) has zero authentication — nothing populates `reque
 
 Use **Approach 1 from exploration**: JWKS verification + per-request `profiles.role` lookup.
 
-Rationale: Unblocks `@Roles` tasks with minimum viable auth. No custom claims, no auth hooks, no token refresh logic — standard Supabase flow. Role changes take effect on next request (matches `RolesGuard` comment). Local Supabase exposes JWKS at `http://127.0.0.1:54321/auth/v1/jwks`; `jwks-rsa` caches keys in-memory. API stays on superuser connection — RLS gap not closed in this slice.
+Rationale: Unblocks `@Roles` tasks with minimum viable auth. No custom claims, no auth hooks, no token refresh logic — standard Supabase flow. Role changes take effect on next request (matches `RolesGuard` comment). Local Supabase exposes JWKS at `http://127.0.0.1:54321/auth/v1/.well-known/jwks.json`; `jwks-rsa` caches keys in-memory. API stays on superuser connection — RLS gap not closed in this slice.
 
 Implementation:
 1. Add deps: `@nestjs/jwt`, `jwks-rsa`, `@supabase/supabase-js` (admin client for tests)
@@ -71,7 +71,7 @@ Revert `app.module.ts` to remove `AuthModule` and `APP_GUARD` registration. Dele
 
 ## Dependencies
 
-- Local Supabase running (`supabase start`) exposing JWKS at `http://127.0.0.1:54321/auth/v1/jwks`
+- Local Supabase running (`supabase start`) exposing JWKS at `http://127.0.0.1:54321/auth/v1/.well-known/jwks.json`
 - `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` in `.env` (already present)
 - `@nestjs/jwt` ^11.x, `jwks-rsa` ^3.x, `@supabase/supabase-js` ^2.x
 

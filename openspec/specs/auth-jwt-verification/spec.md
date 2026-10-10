@@ -21,7 +21,7 @@ The system MUST extract the access token from the `Authorization: Bearer <token>
 
 ### Requirement: JWKS Signature Verification
 
-The system MUST verify the token signature against the Supabase JWKS endpoint (`SUPABASE_URL/auth/v1/jwks`). A token with an invalid signature or one that cannot be matched to a JWKS key MUST be rejected with HTTP 401.
+The system MUST verify the token signature against the Supabase JWKS endpoint (`SUPABASE_URL/auth/v1/.well-known/jwks.json`). A token with an invalid signature or one that cannot be matched to a JWKS key MUST be rejected with HTTP 401.
 
 #### Scenario: Valid signature passes verification
 
