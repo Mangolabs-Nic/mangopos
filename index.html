@@ -4,10 +4,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PoopPOS — Sistema de Control Todo en Uno para Pequeños Negocios</title>
+  <title>MangoPOS — Sistema de Control Todo en Uno para Pequeños Negocios</title>
   <meta name="description"
-    content="PoopPOS es un sistema POS gratuito con base de datos local para pequeños negocios. Ventas, gastos, inventario, clientes, proveedores, empleados, reportes, cuentas y configuración en un solo lugar.">
+    content="MangoPOS es un sistema POS gratuito con base de datos local para pequeños negocios. Ventas, gastos, inventario, clientes, proveedores, empleados, reportes, cuentas y configuración en un solo lugar.">
   <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="images/brand/app-icon-navy.png">
+  <meta name="theme-color" content="#0D182A">
 
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -16,34 +18,46 @@
       theme: {
         extend: {
           colors: {
-            poop: {
-              50: '#fef7ed',
-              100: '#fdecd4',
-              200: '#fad5a8',
-              300: '#f6b871',
-              400: '#f19338',
-              500: '#ee7b15',
-              600: '#df610b',
-              700: '#b9490c',
-              800: '#933a12',
-              900: '#773112',
+            brand: {
+              50: '#FFF4EB',
+              100: '#FFE3CC',
+              200: '#FFC799',
+              300: '#FFAC66',
+              400: '#FF8A33',
+              500: '#FF6D00',
+              600: '#E25E00',
+              700: '#C04F00',
+              800: '#993D00',
+              900: '#7A3000',
+            },
+            mango: {
+              50: '#FFF8E0',
+              100: '#FFEFC2',
+              200: '#FFE491',
+              300: '#FFD961',
+              400: '#FFC538',
+              500: '#FFB100',
+              600: '#E09C00',
+              700: '#B87F00',
+              800: '#8F6200',
+              900: '#6B4A00',
             },
             dark: {
-              50: '#f6f6f6',
-              100: '#e7e7e7',
-              200: '#d1d1d1',
-              300: '#b0b0b0',
-              400: '#888888',
-              500: '#6d6d6d',
-              600: '#5d5d5d',
-              700: '#4f4f4f',
-              800: '#383838',
-              900: '#2a2a2a',
-              950: '#1a1a1a',
+              50: '#F2F5F9',
+              100: '#E4E9F0',
+              200: '#CBD4E0',
+              300: '#A5B3C6',
+              400: '#8B9BB2',
+              500: '#72849F',
+              600: '#5A6B86',
+              700: '#44526C',
+              800: '#2E3A52',
+              900: '#111D34',
+              950: '#0D182A',
             }
           },
           fontFamily: {
-            sans: ['Inter', 'system-ui', 'sans-serif'],
+            sans: ['Poppins', 'Segoe UI', 'system-ui', '-apple-system', 'sans-serif'],
           },
         },
       },
@@ -53,7 +67,7 @@
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap"
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;700&display=swap"
     rel="stylesheet">
 
   <style>
@@ -61,15 +75,9 @@
       scroll-behavior: smooth;
     }
 
-    body {
-      font-family: 'Inter', system-ui, sans-serif;
-      background-color: #0f0f0f;
-      color: #e7e7e7;
-    }
-
     /* Gradient text */
     .gradient-text {
-      background: linear-gradient(135deg, #f19338, #ee7b15, #df610b);
+      background: linear-gradient(135deg, #FF8A33, #FF6D00, #E25E00);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
@@ -81,7 +89,7 @@
       width: 600px;
       height: 600px;
       border-radius: 50%;
-      background: radial-gradient(circle, rgba(241, 147, 56, 0.12) 0%, transparent 70%);
+      background: radial-gradient(circle, rgba(255, 109, 0, 0.12) 0%, transparent 70%);
       top: -200px;
       left: 50%;
       transform: translateX(-50%);
@@ -91,16 +99,16 @@
 
     /* Feature card hover */
     .feature-card {
-      background: linear-gradient(145deg, rgba(42, 42, 42, 0.6), rgba(26, 26, 26, 0.8));
+      background: linear-gradient(145deg, rgba(29, 39, 64, 0.6), rgba(17, 29, 52, 0.8));
       border: 1px solid rgba(255, 255, 255, 0.06);
       backdrop-filter: blur(10px);
       transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
     .feature-card:hover {
-      border-color: rgba(241, 147, 56, 0.3);
+      border-color: rgba(255, 109, 0, 0.3);
       transform: translateY(-4px);
-      box-shadow: 0 20px 40px -12px rgba(241, 147, 56, 0.15);
+      box-shadow: 0 20px 40px -12px rgba(255, 109, 0, 0.15);
     }
 
     /* Screenshot showcase */
@@ -113,7 +121,7 @@
       position: absolute;
       inset: -2px;
       border-radius: 1rem;
-      background: linear-gradient(135deg, rgba(241, 147, 56, 0.4), rgba(223, 97, 11, 0.1));
+      background: linear-gradient(135deg, rgba(255, 109, 0, 0.4), rgba(226, 94, 0, 0.1));
       z-index: -1;
     }
 
@@ -177,7 +185,7 @@
     .nav-blur {
       backdrop-filter: blur(16px) saturate(180%);
       -webkit-backdrop-filter: blur(16px) saturate(180%);
-      background: rgba(15, 15, 15, 0.8);
+      background: rgba(13, 24, 42, 0.8);
     }
 
     /* Smooth scroll offset for fixed nav */
@@ -197,9 +205,9 @@
       flex-shrink: 0;
     }
 
-    /* CTA Button */
+    /* CTA Button — darker brand-orange stops so white button text meets 4.5:1 */
     .cta-btn {
-      background: linear-gradient(135deg, #f19338, #df610b);
+      background: linear-gradient(135deg, #C04F00, #993D00);
       transition: all 0.3s ease;
       position: relative;
       overflow: hidden;
@@ -222,27 +230,30 @@
 
     .cta-btn:hover {
       transform: translateY(-2px);
-      box-shadow: 0 12px 30px -8px rgba(241, 147, 56, 0.5);
+      box-shadow: 0 12px 30px -8px rgba(255, 109, 0, 0.5);
     }
 
     /* Stat card */
     .stat-card {
-      background: rgba(42, 42, 42, 0.4);
+      background: rgba(29, 39, 64, 0.4);
       border: 1px solid rgba(255, 255, 255, 0.05);
     }
 
     /* Version card */
     .version-card {
-      background: linear-gradient(145deg, rgba(42, 42, 42, 0.3), rgba(26, 26, 26, 0.5));
-      border: 1px solid rgba(241, 147, 56, 0.15);
+      background: linear-gradient(145deg, rgba(29, 39, 64, 0.3), rgba(17, 29, 52, 0.5));
+      border: 1px solid rgba(255, 109, 0, 0.15);
       transition: all 0.3s ease;
     }
 
     .version-card:hover {
-      border-color: rgba(241, 147, 56, 0.3);
-      box-shadow: 0 4px 20px -8px rgba(241, 147, 56, 0.1);
+      border-color: rgba(255, 109, 0, 0.3);
+      box-shadow: 0 4px 20px -8px rgba(255, 109, 0, 0.1);
     }
   </style>
+
+  <!-- Brand tokens — loaded after Tailwind CDN and legacy inline styles so it can override -->
+  <link rel="stylesheet" href="style.css">
 </head>
 
 <body class="antialiased">
@@ -252,10 +263,10 @@
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       <div class="flex items-center justify-between h-16">
         <!-- Logo -->
-        <a href="#" class="flex items-center gap-3 group" aria-label="PoopPOS Inicio">
-          <img src="images/logos.png" alt="PoopPOS logo"
-            class="w-10 h-10 rounded-full object-contain group-hover:scale-105 transition-transform duration-300 drop-shadow-md">
-          <span class="text-xl font-bold tracking-tight">Poop<span class="gradient-text">POS</span></span>
+        <a href="#" class="flex items-center gap-3 group" aria-label="MangoPOS Inicio">
+          <img src="images/brand/logo-mark-icon.png" alt="MangoPOS"
+            class="w-10 h-10 rounded-lg object-contain group-hover:scale-105 transition-transform duration-300 drop-shadow-md">
+          <span class="text-xl font-bold tracking-tight">Mango<span class="gradient-text">POS</span></span>
         </a>
 
         <!-- Desktop Nav -->
@@ -267,6 +278,7 @@
           <a href="#screenshots" class="text-sm text-dark-300 hover:text-white transition-colors duration-200">Vista
             Previa</a>
           <a href="#tutorial" class="text-sm text-dark-300 hover:text-white transition-colors duration-200">Tutorial</a>
+          <!-- Intentionally kept: the itch.io game page still uses the legacy "pooppos" slug. -->
           <a href="https://geraldglitch.itch.io/pooppos" target="_blank" rel="noopener"
             class="cta-btn text-sm font-semibold text-white px-5 py-2 rounded-full">
             Descargar Gratis
@@ -309,18 +321,18 @@
       <div class="text-center max-w-4xl mx-auto">
         <!-- Badge -->
         <div
-          class="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-poop-700/30 bg-poop-900/20 mb-8 badge-shimmer">
+          class="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-brand-700/30 bg-brand-900/20 mb-8 badge-shimmer">
           <span class="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>
-          <span class="text-xs font-medium text-poop-300 tracking-wide uppercase">100% Gratis · Base de datos
+          <span class="text-xs font-medium text-brand-300 tracking-wide uppercase">100% Gratis · Base de datos
             local</span>
         </div>
 
         <!-- Logo -->
         <div class="flex justify-center mb-8">
           <div class="relative">
-            <div class="absolute inset-0 rounded-full bg-poop-500/10 blur-3xl pulse-ring"></div>
-            <img src="images/logos.png" alt="PoopPOS mascota"
-              class="w-32 h-32 sm:w-40 sm:h-40 relative float-animation drop-shadow-2xl">
+            <div class="absolute inset-0 rounded-full bg-brand-500/10 blur-3xl pulse-ring"></div>
+            <img src="images/brand/monochrome-white.png" alt="MangoPOS"
+              class="w-32 h-32 sm:w-40 sm:h-40 relative float-animation drop-shadow-2xl object-contain">
           </div>
         </div>
 
@@ -332,7 +344,7 @@
 
         <!-- Subheading -->
         <p class="text-lg sm:text-xl text-dark-300 max-w-2xl mx-auto mb-10 leading-relaxed">
-          PoopPOS es el sistema todo en uno que necesitas para administrar ventas, gastos, inventario, clientes y más.
+          MangoPOS es el sistema todo en uno que necesitas para administrar ventas, gastos, inventario, clientes y más.
           Sin costos mensuales, sin internet obligatorio.
         </p>
 
@@ -374,13 +386,13 @@
         <!-- Version card -->
         <div id="version-card" class="version-card mt-8 max-w-md mx-auto rounded-2xl p-5 text-left hidden">
           <div class="flex items-center gap-2 mb-2">
-            <span class="w-1.5 h-1.5 rounded-full bg-poop-400 animate-pulse"></span>
-            <span id="version-title" class="text-sm font-semibold text-poop-300"></span>
+            <span class="w-1.5 h-1.5 rounded-full bg-brand-400 animate-pulse"></span>
+            <span id="version-title" class="text-sm font-semibold text-brand-300"></span>
           </div>
           <p id="version-message" class="text-xs text-dark-400 leading-relaxed whitespace-pre-line"></p>
           <p class="text-xs text-dark-400 mt-3">Checa el devlog completo acá: <a
               href="https://geraldglitch.itch.io/pooppos/devlog/1621776/epic-update-v-107" target="_blank" rel="noopener"
-              class="text-poop-400 hover:text-poop-300 transition-colors font-medium">Ver devlog</a></p>
+              class="text-brand-400 hover:text-brand-300 transition-colors font-medium">Ver devlog</a></p>
         </div>
       </div>
     </div>
@@ -399,7 +411,7 @@
 
       <!-- Section Header -->
       <div class="text-center max-w-2xl mx-auto mb-16">
-        <span class="text-xs font-semibold tracking-widest uppercase text-poop-400 mb-3 block">¿Por qué PoopPOS?</span>
+        <span class="text-xs font-semibold tracking-widest uppercase text-brand-400 mb-3 block">¿Por qué MangoPOS?</span>
         <h2 class="text-3xl sm:text-4xl font-bold tracking-tight mb-4">
           Todo lo que necesitas,<br><span class="gradient-text">nada que no</span>
         </h2>
@@ -415,7 +427,7 @@
           <div class="feature-icon bg-green-500/10 text-green-400 mb-4">💰</div>
           <h3 class="text-lg font-semibold mb-2">100% Gratuito</h3>
           <p class="text-sm text-dark-400 leading-relaxed">
-            Sin costos escondidos, sin suscripciones mensuales. PoopPOS es y será siempre totalmente gratis.
+            Sin costos escondidos, sin suscripciones mensuales. MangoPOS es y será siempre totalmente gratis.
           </p>
         </div>
 
@@ -431,7 +443,7 @@
 
         <!-- Multi-currency -->
         <div class="feature-card rounded-2xl p-6">
-          <div class="feature-icon bg-poop-500/10 text-poop-400 mb-4">💱</div>
+          <div class="feature-icon bg-brand-500/10 text-brand-400 mb-4">💱</div>
           <h3 class="text-lg font-semibold mb-2">Multi-Moneda</h3>
           <p class="text-sm text-dark-400 leading-relaxed">
             Configura las monedas que aceptas, define cuál es la principal y trabaja con tasas de cambio personalizadas.
@@ -472,13 +484,13 @@
   <!-- ==================== MODULES DETAIL ==================== -->
   <section class="py-24 relative" id="modules">
     <!-- Subtle background gradient -->
-    <div class="absolute inset-0 bg-gradient-to-b from-transparent via-poop-900/5 to-transparent pointer-events-none">
+    <div class="absolute inset-0 bg-gradient-to-b from-transparent via-brand-900/5 to-transparent pointer-events-none">
     </div>
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
       <!-- Section Header -->
       <div class="text-center max-w-2xl mx-auto mb-16">
-        <span class="text-xs font-semibold tracking-widest uppercase text-poop-400 mb-3 block">Módulos</span>
+        <span class="text-xs font-semibold tracking-widest uppercase text-brand-400 mb-3 block">Módulos</span>
         <h2 class="text-3xl sm:text-4xl font-bold tracking-tight mb-4">
           Un módulo para<br><span class="gradient-text">cada necesidad</span>
         </h2>
@@ -495,7 +507,7 @@
           <div class="flex items-start gap-4">
             <div class="feature-icon bg-yellow-500/10"><img src="images/iconVentas.png" alt="Ventas" class="w-9 h-9"></div>
             <div>
-              <h3 class="text-base font-semibold mb-1.5 group-hover:text-poop-300 transition-colors">Ventas</h3>
+              <h3 class="text-base font-semibold mb-1.5 group-hover:text-brand-300 transition-colors">Ventas</h3>
               <p class="text-sm text-dark-400 leading-relaxed">
                 Procesa ventas en las monedas que configures. Incluye venta rápida para clientes que no están
                 registrados o no desean dar sus datos.
@@ -509,7 +521,7 @@
           <div class="flex items-start gap-4">
             <div class="feature-icon bg-red-500/10"><img src="images/iconGastos.png" alt="Gastos" class="w-9 h-9"></div>
             <div>
-              <h3 class="text-base font-semibold mb-1.5 group-hover:text-poop-300 transition-colors">Gastos</h3>
+              <h3 class="text-base font-semibold mb-1.5 group-hover:text-brand-300 transition-colors">Gastos</h3>
               <p class="text-sm text-dark-400 leading-relaxed">
                 Registra transacciones de gastos con proveedores. Opción de gasto rápido para registrar sin
                 complicaciones.
@@ -523,7 +535,7 @@
           <div class="flex items-start gap-4">
             <div class="feature-icon bg-amber-500/10"><img src="images/iconInventario.png" alt="Inventario" class="w-9 h-9"></div>
             <div>
-              <h3 class="text-base font-semibold mb-1.5 group-hover:text-poop-300 transition-colors">Inventario</h3>
+              <h3 class="text-base font-semibold mb-1.5 group-hover:text-brand-300 transition-colors">Inventario</h3>
               <p class="text-sm text-dark-400 leading-relaxed">
                 Agrega productos y asigna categorías para organizarlos mejor. Gestiona categorías disponibles desde el
                 propio módulo.
@@ -537,7 +549,7 @@
           <div class="flex items-start gap-4">
             <div class="feature-icon bg-blue-500/10"><img src="images/iconClientes.png" alt="Clientes" class="w-9 h-9"></div>
             <div>
-              <h3 class="text-base font-semibold mb-1.5 group-hover:text-poop-300 transition-colors">Clientes</h3>
+              <h3 class="text-base font-semibold mb-1.5 group-hover:text-brand-300 transition-colors">Clientes</h3>
               <p class="text-sm text-dark-400 leading-relaxed">
                 Guarda información de contacto de tus clientes y lleva seguimiento de sus gastos a lo largo del tiempo.
               </p>
@@ -550,7 +562,7 @@
           <div class="flex items-start gap-4">
             <div class="feature-icon bg-orange-500/10"><img src="images/iconProveedores.png" alt="Proveedores" class="w-9 h-9"></div>
             <div>
-              <h3 class="text-base font-semibold mb-1.5 group-hover:text-poop-300 transition-colors">Proveedores</h3>
+              <h3 class="text-base font-semibold mb-1.5 group-hover:text-brand-300 transition-colors">Proveedores</h3>
               <p class="text-sm text-dark-400 leading-relaxed">
                 Administra información de proveedores y controla cuánto has gastado con cada uno a lo largo del tiempo.
               </p>
@@ -563,7 +575,7 @@
           <div class="flex items-start gap-4">
             <div class="feature-icon bg-indigo-500/10"><img src="images/iconEmpleados.png" alt="Empleados" class="w-9 h-9"></div>
             <div>
-              <h3 class="text-base font-semibold mb-1.5 group-hover:text-poop-300 transition-colors">Empleados</h3>
+              <h3 class="text-base font-semibold mb-1.5 group-hover:text-brand-300 transition-colors">Empleados</h3>
               <p class="text-sm text-dark-400 leading-relaxed">
                 Crea perfiles con acceso a la app, gestiona permisos individuales e información de contacto de cada
                 empleado.
@@ -577,7 +589,7 @@
           <div class="flex items-start gap-4">
             <div class="feature-icon bg-teal-500/10"><img src="images/iconReportes.png" alt="Reportes" class="w-9 h-9"></div>
             <div>
-              <h3 class="text-base font-semibold mb-1.5 group-hover:text-poop-300 transition-colors">Reportes</h3>
+              <h3 class="text-base font-semibold mb-1.5 group-hover:text-brand-300 transition-colors">Reportes</h3>
               <p class="text-sm text-dark-400 leading-relaxed">
                 Al seleccionar "Terminar día" en Ventas, se genera un reporte completo con todas las transacciones del
                 día.
@@ -591,7 +603,7 @@
           <div class="flex items-start gap-4">
             <div class="feature-icon bg-emerald-500/10"><img src="images/iconCuentas.png" alt="Cuentas" class="w-9 h-9"></div>
             <div>
-              <h3 class="text-base font-semibold mb-1.5 group-hover:text-poop-300 transition-colors">Cuentas</h3>
+              <h3 class="text-base font-semibold mb-1.5 group-hover:text-brand-300 transition-colors">Cuentas</h3>
               <p class="text-sm text-dark-400 leading-relaxed">
                 Administra y crea cuentas financieras para ver balances en todas las monedas soportadas por tu negocio.
               </p>
@@ -604,7 +616,7 @@
           <div class="flex items-start gap-4">
             <div class="feature-icon bg-gray-500/10"><img src="images/iconConfig.png" alt="Configuración" class="w-9 h-9"></div>
             <div>
-              <h3 class="text-base font-semibold mb-1.5 group-hover:text-poop-300 transition-colors">Configuración</h3>
+              <h3 class="text-base font-semibold mb-1.5 group-hover:text-brand-300 transition-colors">Configuración</h3>
               <p class="text-sm text-dark-400 leading-relaxed">
                 Configura monedas soportadas, define la moneda principal y revisa logs de actividad para rastrear
                 acciones de usuarios.
@@ -621,7 +633,7 @@
   <section class="py-24 relative" id="services">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       <div class="text-center max-w-2xl mx-auto mb-16">
-        <span class="text-xs font-semibold tracking-widest uppercase text-poop-400 mb-3 block">Servicios</span>
+        <span class="text-xs font-semibold tracking-widest uppercase text-brand-400 mb-3 block">Servicios</span>
         <h2 class="text-3xl sm:text-4xl font-bold tracking-tight mb-4">
           Software gratis,<br><span class="gradient-text">acompañamiento opcional</span>
         </h2>
@@ -633,14 +645,14 @@
       <div class="grid sm:grid-cols-2 md:grid-cols-4 gap-6 max-w-6xl mx-auto">
         <!-- Implementación Completa -->
         <div class="feature-card rounded-2xl p-6 sm:p-8 text-center group flex flex-col">
-          <div class="feature-icon bg-poop-500/10 text-poop-400 mx-auto mb-5 text-2xl">🚀</div>
+          <div class="feature-icon bg-brand-500/10 text-brand-400 mx-auto mb-5 text-2xl">🚀</div>
           <h3 class="text-lg font-semibold mb-2">Implementación Completa</h3>
           <p class="text-sm text-dark-400 leading-relaxed mb-5">
             Instalamos el software, importamos tus productos, clientes y empleados, capacitamos a tu staff. Todo listo para operar.
           </p>
           <span class="inline-block text-2xl font-bold gradient-text">$200</span>
           <p class="text-xs text-dark-500 mt-1 mb-5">pago único</p>
-          <a href="https://wa.me/50588047240?text=Hola,%20quiero%20informaci%C3%B3n%20de%20poopPOS%20-%20Implementaci%C3%B3n%20Completa" target="_blank" rel="noopener" class="cta-btn text-sm font-semibold text-white px-4 py-2.5 rounded-full inline-flex items-center justify-center gap-2 mt-auto">
+          <a href="https://wa.me/50588047240?text=Hola,%20quiero%20informaci%C3%B3n%20de%20MangoPOS%20-%20Implementaci%C3%B3n%20Completa" target="_blank" rel="noopener" class="cta-btn text-sm font-semibold text-white px-4 py-2.5 rounded-full inline-flex items-center justify-center gap-2 mt-auto">
             <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
             Solicitar
           </a>
@@ -651,11 +663,11 @@
           <div class="feature-icon bg-blue-500/10 text-blue-400 mx-auto mb-5 text-2xl">🎓</div>
           <h3 class="text-lg font-semibold mb-2">Capacitación de Personal</h3>
           <p class="text-sm text-dark-400 leading-relaxed mb-5">
-            Sesión con tu equipo para que aprendan a usar PoopPOS. Resolvemos dudas, explicamos flujos, dejamos a todos listos.
+            Sesión con tu equipo para que aprendan a usar MangoPOS. Resolvemos dudas, explicamos flujos, dejamos a todos listos.
           </p>
           <span class="inline-block text-2xl font-bold gradient-text">$30</span>
           <p class="text-xs text-dark-500 mt-1 mb-5">por sesión</p>
-          <a href="https://wa.me/50588047240?text=Hola,%20quiero%20informaci%C3%B3n%20de%20poopPOS%20-%20Capacitaci%C3%B3n%20de%20Personal" target="_blank" rel="noopener" class="cta-btn text-sm font-semibold text-white px-4 py-2.5 rounded-full inline-flex items-center justify-center gap-2 mt-auto">
+          <a href="https://wa.me/50588047240?text=Hola,%20quiero%20informaci%C3%B3n%20de%20MangoPOS%20-%20Capacitaci%C3%B3n%20de%20Personal" target="_blank" rel="noopener" class="cta-btn text-sm font-semibold text-white px-4 py-2.5 rounded-full inline-flex items-center justify-center gap-2 mt-auto">
             <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
             Solicitar
           </a>
@@ -670,7 +682,7 @@
           </p>
           <span class="inline-block text-2xl font-bold gradient-text">$20-$40</span>
           <p class="text-xs text-dark-500 mt-1 mb-5">según volumen</p>
-          <a href="https://wa.me/50588047240?text=Hola,%20quiero%20informaci%C3%B3n%20de%20poopPOS%20-%20Importaci%C3%B3n%20en%20Lote" target="_blank" rel="noopener" class="cta-btn text-sm font-semibold text-white px-4 py-2.5 rounded-full inline-flex items-center justify-center gap-2 mt-auto">
+          <a href="https://wa.me/50588047240?text=Hola,%20quiero%20informaci%C3%B3n%20de%20MangoPOS%20-%20Importaci%C3%B3n%20en%20Lote" target="_blank" rel="noopener" class="cta-btn text-sm font-semibold text-white px-4 py-2.5 rounded-full inline-flex items-center justify-center gap-2 mt-auto">
             <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
             Solicitar
           </a>
@@ -685,7 +697,7 @@
           </p>
           <span class="inline-block text-2xl font-bold gradient-text">$60-$100</span>
           <p class="text-xs text-dark-500 mt-1 mb-5">según volumen</p>
-          <a href="https://wa.me/50588047240?text=Hola,%20quiero%20informaci%C3%B3n%20de%20poopPOS%20-%20Carga%20Manual%20de%20Datos" target="_blank" rel="noopener" class="cta-btn text-sm font-semibold text-white px-4 py-2.5 rounded-full inline-flex items-center justify-center gap-2 mt-auto">
+          <a href="https://wa.me/50588047240?text=Hola,%20quiero%20informaci%C3%B3n%20de%20MangoPOS%20-%20Carga%20Manual%20de%20Datos" target="_blank" rel="noopener" class="cta-btn text-sm font-semibold text-white px-4 py-2.5 rounded-full inline-flex items-center justify-center gap-2 mt-auto">
             <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
             Solicitar
           </a>
@@ -699,7 +711,7 @@
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       <!-- Section Header -->
       <div class="text-center max-w-2xl mx-auto mb-16">
-        <span class="text-xs font-semibold tracking-widest uppercase text-poop-400 mb-3 block">Aprende a usarlo</span>
+        <span class="text-xs font-semibold tracking-widest uppercase text-brand-400 mb-3 block">Aprende a usarlo</span>
         <h2 class="text-3xl sm:text-4xl font-bold tracking-tight mb-4">
           Tutorial y <span class="gradient-text">primeros pasos</span>
         </h2>
@@ -714,7 +726,7 @@
           <iframe 
             class="w-full h-full"
             src="https://www.youtube.com/embed/DcoOU_vywM8" 
-            title="PoopPOS Tutorial" 
+            title="MangoPOS Tutorial" 
             frameborder="0" 
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
             referrerpolicy="strict-origin-when-cross-origin" 
@@ -730,7 +742,7 @@
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       <!-- Section Header -->
       <div class="text-center max-w-2xl mx-auto mb-16">
-        <span class="text-xs font-semibold tracking-widest uppercase text-poop-400 mb-3 block">Vista Previa</span>
+        <span class="text-xs font-semibold tracking-widest uppercase text-brand-400 mb-3 block">Vista Previa</span>
         <h2 class="text-3xl sm:text-4xl font-bold tracking-tight mb-4">
           Conoce la <span class="gradient-text">interfaz</span>
         </h2>
@@ -744,7 +756,7 @@
         <!-- Dashboard -->
         <div>
           <div class="screenshot-wrapper rounded-2xl overflow-hidden">
-            <img src="images/main-dashboard.png" alt="PoopPOS Dashboard principal mostrando los 9 módulos"
+            <img src="images/main-dashboard.png" alt="MangoPOS Dashboard principal mostrando los 9 módulos"
               class="w-full rounded-2xl" loading="lazy">
           </div>
           <p class="text-center text-sm text-dark-400 mt-4 font-medium">Dashboard Principal — Acceso rápido a todos los
@@ -754,7 +766,7 @@
         <!-- Login -->
         <div>
           <div class="screenshot-wrapper rounded-2xl overflow-hidden">
-            <img src="images/login.png" alt="PoopPOS pantalla de login con PIN" class="w-full rounded-2xl"
+            <img src="images/login.png" alt="MangoPOS pantalla de login con PIN" class="w-full rounded-2xl"
               loading="lazy">
           </div>
           <p class="text-center text-sm text-dark-400 mt-4 font-medium">Login con PIN — Seguro y rápido para cada
@@ -766,20 +778,20 @@
 
   <!-- ==================== CTA / DOWNLOAD ==================== -->
   <section class="py-24 relative" id="download">
-    <div class="absolute inset-0 bg-gradient-to-t from-poop-900/10 to-transparent pointer-events-none"></div>
+    <div class="absolute inset-0 bg-gradient-to-t from-brand-900/10 to-transparent pointer-events-none"></div>
 
     <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
       <div class="feature-card rounded-3xl p-8 sm:p-12 text-center">
         <!-- Logo small -->
         <div class="flex justify-center mb-6">
-          <img src="images/logos.png" alt="PoopPOS" class="w-20 h-20 rounded-xl float-animation">
+          <img src="images/brand/monochrome-white.png" alt="MangoPOS" class="w-20 h-20 rounded-xl float-animation object-contain">
         </div>
 
         <h2 class="text-3xl sm:text-4xl font-bold tracking-tight mb-4">
           ¿Listo para tomar el <span class="gradient-text">control</span>?
         </h2>
         <p class="text-dark-300 max-w-lg mx-auto mb-8 leading-relaxed">
-          Descarga PoopPOS hoy y empieza a administrar tu negocio de forma simple, gratuita y sin conexión a internet.
+          Descarga MangoPOS hoy y empieza a administrar tu negocio de forma simple, gratuita y sin conexión a internet.
         </p>
 
         <a href="https://geraldglitch.itch.io/pooppos" target="_blank" rel="noopener"
@@ -803,13 +815,13 @@
       <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
         <!-- Logo -->
         <div class="flex items-center gap-3">
-          <img src="images/logos.png" alt="PoopPOS" class="w-8 h-8 rounded-lg">
-          <span class="text-sm font-semibold">Poop<span class="gradient-text">POS</span></span>
+          <img src="images/brand/logo-mark-icon.png" alt="MangoPOS" class="w-8 h-8 rounded-lg object-contain">
+          <span class="text-sm font-semibold">Mango<span class="gradient-text">POS</span></span>
         </div>
 
         <!-- Copyright -->
         <p class="text-xs text-dark-500">
-          &copy; 2026 PoopPOS by GeraldGlitch Todos los derechos reservados.
+          &copy; 2026 MangoPOS &middot; MangoLabs Todos los derechos reservados.
         </p>
 
         <!-- Links -->
@@ -880,8 +892,8 @@
 
     // Version card: fetch version.json, fallback embebido si falla (file:// bloquea fetch por CORS)
     const fallbackVersion = {
-      title: "Nueva Actualización disponible - v 1.0.7",
-      message: "EPIC UPDATE - Proud to deliver version (1.0.7) \n\n-Ahora puedes utilizar multiples dispositivos: Config > WebServer\n-Implementación OrderFlow para restaurantes, habilitalo en 'Config -> OrderFlow'"
+      title: "",
+      message: ""
     };
 
     function showVersionCard(data) {
