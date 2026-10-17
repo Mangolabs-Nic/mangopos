@@ -16,14 +16,10 @@ describe('AppController (e2e)', () => {
     await app.init();
   });
 
-  it('/health (GET)', () => {
-    return request(app.getHttpServer())
-      .get('/health')
-      .expect(200)
-      .expect((res) => {
-        expect(res.body.status).toBe('ok');
-        expect(res.body.databaseConfigured).toBeTypeOf('boolean');
-      });
+  // /health is a normal route, so the global JwtAuthGuard protects it. The
+  // public connectivity probe is /auth/health (see auth.e2e-spec.ts).
+  it('/health (GET) requires authentication', () => {
+    return request(app.getHttpServer()).get('/health').expect(401);
   });
 
   afterEach(async () => {

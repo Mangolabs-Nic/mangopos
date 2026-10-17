@@ -1,37 +1,53 @@
 project: mangopos
 name: MangoPOS
-description: Documentation site for the MangoLabs POS rebuild project
+description: MangoLabs POS rebuild — NestJS API + local Supabase, with a Docusaurus documentation site
 stack:
   runtime: node
   node_version: ">=20"
-  framework: docusaurus
-  docusaurus_version: "3.10.2"
-  ui_library: react
-  react_version: "19.1.1"
-  language: javascript
-  module_system: esm
+  language: typescript
   package_manager: npm
+  monorepo: true
+  build_system: turbo
   workspaces: true
   workspace_packages:
+    - "@mangolabs/mangopos-api"
     - "@mangolabs/mangopos-docs"
 architecture:
   pattern: monorepo
   apps:
+    - name: api
+      path: apps/api
+      type: backend
+      framework: nestjs
+      builder: turbo
+      database: supabase-postgres
+      auth: none
+      notes: "Supabase Auth (GoTrue) is the planned auth provider; the legacy desktop app's PIN login is being replaced."
     - name: rebuild-docs
       path: apps/rebuild-docs
       type: documentation
       framework: docusaurus
+      docusaurus_version: "3.10.2"
+      ui_library: react
+      react_version: "19.1.1"
 testing:
   strict_tdd: false
-  test_runner: none
-  test_files: 0
-  test_scripts: []
-  coverage: none
-  layers: []
-  recommendation: "If tests are needed, Vitest + React Testing Library for React components, Playwright for Docusaurus E2E"
+  test_runner: vitest
+  test_files: 4
+  test_scripts:
+    - "npm test"
+    - "npm run test:e2e"
+    - "npm run db:verify"
+  coverage: unknown
+  layers:
+    - unit
+    - e2e
+    - schema-assertions
+  recommendation: "Vitest is already wired in apps/api (unit + e2e). Keep schema guarantees in scripts/verify-schema.sql."
 linting:
+  oxlint: true
   eslint: false
-  prettier: false
+  prettier: true
   stylelint: false
 ci:
   provider: github_actions
@@ -41,9 +57,9 @@ ci:
       triggers: [pull_request, push, workflow_dispatch]
       deploy_target: github_pages
 conventions:
-  commit_style: unknown
-  branch_strategy: unknown
-  code_style: none_enforced
+  commit_style: conventional
+  branch_strategy: feature-branch
+  code_style: oxlint + prettier
 persistence:
   mode: hybrid
   openspec: true
