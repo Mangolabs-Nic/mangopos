@@ -683,16 +683,26 @@ BEGIN
 
     DELETE FROM public.businesses WHERE id = shop;
 
-    SELECT (SELECT count(*) FROM public.products      WHERE business_id = shop)
-         + (SELECT count(*) FROM public.sales         WHERE business_id = shop)
-         + (SELECT count(*) FROM public.sale_items    WHERE sale_id = ticket)
-         + (SELECT count(*) FROM public.audit_log     WHERE business_id = shop)
+    -- Closing a business removes what it owned: a shop that no longer exists has no
+    -- catalogue and no ledger. The audit trail deliberately does NOT go with it - see
+    -- migration 010 - so the two are counted apart. A purge that quietly takes the
+    -- evidence with it is the regression this check exists to catch.
+    SELECT (SELECT count(*) FROM public.products   WHERE business_id = shop)
+         + (SELECT count(*) FROM public.sales      WHERE business_id = shop)
+         + (SELECT count(*) FROM public.sale_items WHERE sale_id = ticket)
     INTO remaining;
 
     IF remaining <> 0 THEN
-        RAISE EXCEPTION 'FAIL tenant_teardown: closing a business left % row(s) behind', remaining;
+        RAISE EXCEPTION 'FAIL tenant_teardown: closing a business left % row(s) of catalogue or ledger behind', remaining;
     END IF;
-    RAISE NOTICE 'PASS  closing a business purges its catalogue, sales and audit trail';
+
+    -- The trail outlives the tenant it describes, and still names it. Dropping the
+    -- business_id foreign key is what makes that possible; if this is ever empty the
+    -- evidence is being deleted along with the business again.
+    IF (SELECT count(*) FROM public.audit_log WHERE business_id = shop) = 0 THEN
+        RAISE EXCEPTION 'FAIL audit_evidence_retained: closing a business erased its audit trail';
+    END IF;
+    RAISE NOTICE 'PASS  closing a business purges its catalogue and ledger, and keeps the audit trail';
 END $$;
 
 -- Privilege checks that need no client session ---------------------------------
@@ -1135,6 +1145,333 @@ BEGIN
         RAISE EXCEPTION 'FAIL matrix_server_write: the server could not write the catalogue';
     END IF;
     RAISE NOTICE 'PASS  the server is unaffected by the matrix';
+END $$;
+
+-- The audit trail: append-only, retained, redacted, complete --------------------
+--
+-- Migration 010 turned the trail from "a table nobody wrote to carefully" into
+-- something with invariants. Each of them is asserted here, because every one of
+-- them is the kind that fails silently: an edited entry looks exactly like an
+-- original one, and a dropped trigger is invisible until the day it matters.
+DO $$
+DECLARE
+    leftovers text;
+    entry     jsonb;
+    coverage  integer;
+BEGIN
+    -- The two ways out of a trail that is supposed to be one-way: edit an entry so
+    -- it says something else, or delete it. Both have to fail for the OWNER as well
+    -- as for a client, because the server is exactly who would want to.
+    BEGIN
+        UPDATE public.audit_log SET action = 'tampered';
+        RAISE EXCEPTION 'FAIL audit_append_only: an entry was edited';
+    EXCEPTION WHEN insufficient_privilege THEN
+        NULL;
+    END;
+
+    BEGIN
+        DELETE FROM public.audit_log;
+        RAISE EXCEPTION 'FAIL audit_append_only: an entry was deleted';
+    EXCEPTION WHEN insufficient_privilege THEN
+        NULL;
+    END;
+
+    -- TRUNCATE is not subject to row-level security and not covered by the row
+    -- trigger, so it needs the statement trigger of its own that migration 010 adds.
+    BEGIN
+        TRUNCATE public.audit_log;
+        RAISE EXCEPTION 'FAIL audit_append_only: the trail was truncated';
+    EXCEPTION WHEN insufficient_privilege THEN
+        NULL;
+    END;
+    RAISE NOTICE 'PASS  the trail cannot be edited, deleted or truncated, not even by its owner';
+
+    -- No foreign key may point out of audit_log. ON DELETE CASCADE would erase an
+    -- entry when the business it names is closed, and ON DELETE SET NULL would
+    -- rewrite an actor to nobody when a member is removed - both are the record
+    -- being changed by the thing it records.
+    SELECT string_agg(conname, ', ') INTO leftovers
+      FROM pg_constraint
+     WHERE conrelid = 'public.audit_log'::regclass
+       AND contype = 'f';
+    IF leftovers IS NOT NULL THEN
+        RAISE EXCEPTION 'FAIL audit_evidence_retention: audit_log still has foreign key(s): %', leftovers;
+    END IF;
+    RAISE NOTICE 'PASS  nothing about a business or a member can rewrite the trail';
+
+    -- Redaction is an allowlist, not a denylist: whether a secret is recorded must
+    -- not depend on somebody having remembered to name the column. An unknown column
+    -- and any nested object are dropped; a known scalar survives.
+    SELECT public.audit_safe_values(
+        '{"total": 12.50, "void_reason": "customer left", "pin": "1234",
+          "password": "hunter2", "payload": {"access_token": "abc"}}'::jsonb)
+    INTO entry;
+    IF entry ? 'pin' OR entry ? 'password' OR entry ? 'payload' THEN
+        RAISE EXCEPTION 'FAIL audit_redaction: a non-allowlisted key reached the trail: %', entry;
+    END IF;
+    IF NOT (entry ? 'total') OR NOT (entry ? 'void_reason') THEN
+        RAISE EXCEPTION 'FAIL audit_redaction: an allowlisted column was dropped: %', entry;
+    END IF;
+    RAISE NOTICE 'PASS  only allowlisted scalar columns are recorded, never a nested payload';
+
+    -- Coverage read from the catalogue rather than by writing to ten tables: a
+    -- trigger quietly dropped by a later migration has to fail this, and it will.
+    SELECT count(DISTINCT c.relname) INTO coverage
+      FROM pg_trigger t
+      JOIN pg_class c     ON c.oid = t.tgrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      JOIN pg_proc p      ON p.oid = t.tgfoid
+     WHERE n.nspname = 'public'
+       AND NOT t.tgisinternal
+       AND p.proname = 'audit_row_change';
+    IF coverage <> 10 THEN
+        RAISE EXCEPTION 'FAIL audit_coverage: % tables are audited, the plan names 10', coverage;
+    END IF;
+    RAISE NOTICE 'PASS  all 10 sensitive tables are audited';
+END $$;
+
+-- The sensitive operations name themselves --------------------------------------
+DO $$
+DECLARE
+    biz      uuid := 'dddddddd-1111-1111-1111-000000000001';
+    prod     uuid := 'dddddddd-1111-1111-1111-000000000002';
+    ticket   uuid := 'dddddddd-1111-1111-1111-000000000003';
+    entry_action text;
+    meta          jsonb;
+    recorded      text;
+BEGIN
+    INSERT INTO public.businesses (id, name) VALUES (biz, 'Audited shop');
+    INSERT INTO public.products (id, business_id, name, price, stock)
+    VALUES (prod, biz, 'Audited thing', 10, 5);
+
+    -- A stock adjustment is the operation the plan is most explicit about, and the
+    -- one that had no trigger at all before migration 010. It has to name itself and
+    -- it has to be flagged as something worth looking at.
+    INSERT INTO public.stock_adjustments (product_id, quantity_before, adjustment, quantity_after, reason)
+    VALUES (prod, 5, 2, 7, 'counted the shelf');
+
+    SELECT action, metadata INTO entry_action, meta
+      FROM public.audit_log
+     WHERE entity_type = 'stock_adjustments' AND entity_id = (
+               SELECT id FROM public.stock_adjustments WHERE product_id = prod ORDER BY created_at DESC LIMIT 1)
+     ORDER BY created_at DESC, id DESC
+     LIMIT 1;
+
+    IF entry_action <> 'stock.adjust' THEN
+        RAISE EXCEPTION 'FAIL audit_stock_adjust: the entry reads %, expected stock.adjust', entry_action;
+    END IF;
+    IF (meta ->> 'sensitive')::boolean IS NOT TRUE THEN
+        RAISE EXCEPTION 'FAIL audit_stock_adjust_sensitive: metadata is %', meta;
+    END IF;
+
+    -- A void is an UPDATE of a sale, so without the special case it would be
+    -- indistinguishable from any other edit - and it is the change the whole
+    -- "a completed sale is a fact" rule exists to make visible.
+    INSERT INTO public.sales (id, business_id, total, status) VALUES (ticket, biz, 10, 'completed');
+    UPDATE public.sales SET status = 'voided', void_reason = 'customer left' WHERE id = ticket;
+
+    SELECT action, metadata INTO entry_action, meta
+      FROM public.audit_log
+     WHERE entity_type = 'sales' AND entity_id = ticket
+       -- now() is the transaction clock, so every row the harness writes carries the
+       -- same created_at. The update is named, not the newest row.
+       AND metadata ->> 'operation' = 'UPDATE'
+     ORDER BY created_at DESC, id DESC
+     LIMIT 1;
+
+    IF entry_action <> 'sales.void' THEN
+        RAISE EXCEPTION 'FAIL audit_sale_void: the entry reads %, expected sales.void', entry_action;
+    END IF;
+    IF (meta ->> 'sensitive')::boolean IS NOT TRUE THEN
+        RAISE EXCEPTION 'FAIL audit_sale_void_sensitive: metadata is %', meta;
+    END IF;
+
+    -- The reason is the whole point of the entry for a sensitive change, so it has
+    -- to be in the recorded values and not only in a comment somewhere.
+    SELECT new_values ->> 'void_reason' INTO recorded
+      FROM public.audit_log
+     WHERE entity_type = 'sales' AND entity_id = ticket
+       AND metadata ->> 'operation' = 'UPDATE'
+     ORDER BY created_at DESC, id DESC
+     LIMIT 1;
+    IF recorded <> 'customer left' THEN
+        RAISE EXCEPTION 'FAIL audit_void_reason: the recorded reason is %', COALESCE(recorded, '<null>');
+    END IF;
+
+    RAISE NOTICE 'PASS  a void and a stock adjustment name themselves and keep their reason';
+END $$;
+
+-- Who may read the trail --------------------------------------------------------
+DO $$
+DECLARE
+    biz     uuid := 'dddddddd-2222-2222-2222-000000000001';
+    u_cash  uuid := 'dddddddd-2222-2222-2222-000000000002';
+    u_super uuid := 'dddddddd-2222-2222-2222-000000000003';
+    u_admin uuid := 'dddddddd-2222-2222-2222-000000000004';
+    exp_c   uuid := 'dddddddd-2222-2222-2222-000000000010';
+    exp_s   uuid := 'dddddddd-2222-2222-2222-000000000011';
+    exp_a   uuid := 'dddddddd-2222-2222-2222-000000000012';
+    n       integer;
+BEGIN
+    INSERT INTO public.businesses (id, name) VALUES (biz, 'Scoped shop');
+    INSERT INTO auth.users (id, aud, role, email, encrypted_password,
+                            raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+    VALUES (u_cash, 'authenticated', 'authenticated', 'cash.scope@verify.local',
+                crypt('x', gen_salt('bf')), '{}', '{}', now(), now()),
+           (u_super, 'authenticated', 'authenticated', 'super.scope@verify.local',
+                crypt('x', gen_salt('bf')), '{}', '{}', now(), now()),
+           (u_admin, 'authenticated', 'authenticated', 'admin.scope@verify.local',
+                crypt('x', gen_salt('bf')), '{}', '{}', now(), now());
+
+    UPDATE public.profiles SET business_id = biz, role = 'cashier'    WHERE id = u_cash;
+    UPDATE public.profiles SET business_id = biz, role = 'supervisor' WHERE id = u_super;
+    UPDATE public.profiles SET business_id = biz, role = 'admin'      WHERE id = u_admin;
+
+    -- One expense each. Anyone may record one, so every actor has an entry of their
+    -- own and the only thing that differs between the reads below is who is asking.
+    PERFORM set_config('request.jwt.claim.sub', u_cash::text, true);
+    SET LOCAL ROLE authenticated;
+    INSERT INTO public.expenses (id, business_id, amount, category) VALUES (exp_c, biz, 1, 'cashier');
+    PERFORM set_config('request.jwt.claim.sub', u_super::text, true);
+    INSERT INTO public.expenses (id, business_id, amount, category) VALUES (exp_s, biz, 2, 'supervisor');
+    PERFORM set_config('request.jwt.claim.sub', u_admin::text, true);
+    INSERT INTO public.expenses (id, business_id, amount, category) VALUES (exp_a, biz, 3, 'admin');
+
+    -- A cashier sees their own entry, and none of the other two. Counting only their
+    -- own actor keeps this independent of the rows the fixtures themselves wrote.
+    PERFORM set_config('request.jwt.claim.sub', u_cash::text, true);
+    SELECT count(*) INTO n FROM public.audit_log WHERE business_id = biz AND user_id = u_cash;
+    IF n <> 1 THEN
+        RAISE EXCEPTION 'FAIL audit_read_cashier: a cashier saw % of their own entries, expected 1', n;
+    END IF;
+    SELECT count(*) INTO n FROM public.audit_log WHERE business_id = biz AND user_id <> u_cash;
+    IF n <> 0 THEN
+        RAISE EXCEPTION 'FAIL audit_read_cashier: a cashier read % entries that are not theirs', n;
+    END IF;
+
+    -- A supervisor sees their own and their cashiers', and nothing of the admin's.
+    PERFORM set_config('request.jwt.claim.sub', u_super::text, true);
+    SELECT count(*) INTO n FROM public.audit_log
+     WHERE business_id = biz AND user_id = u_admin;
+    IF n <> 0 THEN
+        RAISE EXCEPTION 'FAIL audit_read_supervisor: a supervisor read an admin''s entry';
+    END IF;
+    SELECT count(*) INTO n FROM public.audit_log
+     WHERE business_id = biz AND user_id IN (u_cash, u_super);
+    IF n <> 2 THEN
+        RAISE EXCEPTION 'FAIL audit_read_supervisor: a supervisor saw % of the 2 entries they may read', n;
+    END IF;
+
+    -- An admin sees the whole trail of their own business. Every actor's entry is
+    -- readable, which is what "admin full access" has to mean in practice.
+    PERFORM set_config('request.jwt.claim.sub', u_admin::text, true);
+    SELECT count(*) INTO n FROM public.audit_log
+     WHERE business_id = biz AND user_id IN (u_cash, u_super, u_admin);
+    IF n <> 3 THEN
+        RAISE EXCEPTION 'FAIL audit_read_admin: an admin saw % of the 3 entries, expected all', n;
+    END IF;
+
+    RESET ROLE;
+    RAISE NOTICE 'PASS  the trail is read by role: admin all, supervisor own plus cashiers, cashier own';
+END $$;
+
+-- No role may write to the trail except through a trigger ------------------------
+DO $$
+BEGIN
+    -- A grant is the difference between "a client cannot" and "a client cannot even
+    -- try". INSERT is included: forging an entry is as bad as editing one, and the
+    -- only writer is meant to be the SECURITY DEFINER trigger.
+    IF has_table_privilege('anon', 'public.audit_log', 'INSERT')
+       OR has_table_privilege('authenticated', 'public.audit_log', 'INSERT')
+       OR has_table_privilege('authenticated', 'public.audit_log', 'UPDATE')
+       OR has_table_privilege('authenticated', 'public.audit_log', 'DELETE')
+       OR has_table_privilege('service_role', 'public.audit_log', 'UPDATE')
+       OR has_table_privilege('service_role', 'public.audit_log', 'DELETE') THEN
+        RAISE EXCEPTION 'FAIL audit_write_grants: a role still holds a write privilege on audit_log';
+    END IF;
+    RAISE NOTICE 'PASS  no role holds INSERT, UPDATE or DELETE on the trail';
+END $$;
+
+-- The API appends through one function, not through a grant ---------------------
+DO $$
+DECLARE
+    fn          regprocedure :=
+        'public.audit_append(text,text,uuid,uuid,uuid,jsonb,jsonb,jsonb)'::regprocedure;
+    entry_id    uuid;
+    entry_meta  jsonb;
+    safe_values jsonb;
+BEGIN
+    -- An INSERT grant would let a client forge any entry it liked. EXECUTE on the
+    -- function is the narrow version of the same power, so it must not reach a
+    -- client either - and it must reach the server, or nothing writes logins.
+    IF has_function_privilege('anon', fn, 'EXECUTE')
+       OR has_function_privilege('authenticated', fn, 'EXECUTE') THEN
+        RAISE EXCEPTION 'FAIL audit_api_write_grant: a client can forge an audit entry';
+    END IF;
+    IF NOT has_function_privilege('service_role', fn, 'EXECUTE') THEN
+        RAISE EXCEPTION 'FAIL audit_api_write_grant: the server cannot append to the trail';
+    END IF;
+
+    -- A login changes no row, so this is the only route it has to the trail. The
+    -- caller tries to smuggle a password, a PIN and a nested token into both the
+    -- values and the metadata; none of them may survive.
+    SELECT public.audit_append(
+        p_action      => 'auth.login',
+        p_entity_type => 'session',
+        p_new_values  => '{"password":"hunter2","pin":"1234","reason":"verify"}'::jsonb,
+        p_metadata    => '{"request_id":"req-verify","ip":"203.0.113.9","outcome":"success",
+                           "password":"hunter2","nested":{"token":"abc"}}'::jsonb)
+    INTO entry_id;
+
+    SELECT metadata, new_values INTO entry_meta, safe_values
+      FROM public.audit_log WHERE id = entry_id;
+
+    IF entry_meta IS NULL THEN
+        RAISE EXCEPTION 'FAIL audit_api_write: the entry was not written';
+    END IF;
+    IF entry_meta ->> 'source' <> 'api' OR entry_meta ->> 'actor_type' <> 'system' THEN
+        RAISE EXCEPTION 'FAIL audit_api_write: source/actor_type were not derived: %', entry_meta;
+    END IF;
+    IF entry_meta ->> 'request_id' <> 'req-verify' OR entry_meta ->> 'ip' <> '203.0.113.9' THEN
+        RAISE EXCEPTION 'FAIL audit_api_write: allowlisted metadata was dropped: %', entry_meta;
+    END IF;
+    IF entry_meta ? 'password' OR entry_meta ? 'nested' THEN
+        RAISE EXCEPTION 'FAIL audit_api_write: a non-allowlisted metadata key reached the trail: %', entry_meta;
+    END IF;
+    IF safe_values ? 'password' OR safe_values ? 'pin' THEN
+        RAISE EXCEPTION 'FAIL audit_api_write: a secret reached old/new_values: %', safe_values;
+    END IF;
+    IF NOT (safe_values ? 'reason') THEN
+        RAISE EXCEPTION 'FAIL audit_api_write: an allowlisted value was dropped: %', safe_values;
+    END IF;
+
+    -- The sensitive flag is raised by the operation, not by the caller. The entry
+    -- is identified by its own request id, not by action: an earlier fixture may
+    -- already hold a `sales.void`.
+    PERFORM public.audit_append(
+        p_action => 'sales.void', p_entity_type => 'sales',
+        p_metadata => '{"sensitive":false,"request_id":"req-verify-void"}'::jsonb);
+    IF NOT EXISTS (
+        SELECT 1 FROM public.audit_log
+        WHERE metadata ->> 'request_id' = 'req-verify-void'
+          AND (metadata ->> 'sensitive')::boolean IS TRUE
+    ) THEN
+        RAISE EXCEPTION 'FAIL audit_api_write: a void could be recorded as non-sensitive';
+    END IF;
+
+    -- And a caller cannot present itself as the trigger.
+    PERFORM public.audit_append(
+        p_action => 'products.update', p_entity_type => 'products',
+        p_metadata => '{"source":"db_trigger","request_id":"req-verify-source"}'::jsonb);
+    IF EXISTS (
+        SELECT 1 FROM public.audit_log
+        WHERE metadata ->> 'request_id' = 'req-verify-source'
+          AND metadata ->> 'source' <> 'api'
+    ) THEN
+        RAISE EXCEPTION 'FAIL audit_api_write: an API caller relabelled itself as a trigger';
+    END IF;
+
+    RAISE NOTICE 'PASS  the API appends only through audit_append, allowlisted and attributed';
 END $$;
 
 ROLLBACK;

@@ -21,7 +21,13 @@ import { ROLES_KEY } from './roles.decorator.js';
  * 401 rather than silently allowing through.
  */
 export interface AuthenticatedRequest {
-  user?: { appRole?: Role };
+  user?: {
+    /** `public.profiles.id` / `auth.uid()`. The actor the audit trail records. */
+    userId?: string;
+    /** The tenant the principal belongs to. Audit entries are scoped by it. */
+    businessId?: string;
+    appRole?: Role;
+  };
 }
 
 /**
