@@ -25,7 +25,14 @@ const EVENT_ROUTES: ReadonlyArray<{
   sensitive?: boolean;
 }> = [
   { pattern: /^\/auth\/login\/?$/, action: 'auth.login', entityType: 'session' },
+  { pattern: /^\/auth\/pin\/?$/, action: 'auth.login_pin', entityType: 'session' },
   { pattern: /^\/auth\/logout\/?$/, action: 'auth.logout', entityType: 'session' },
+  {
+    pattern: /^\/auth\/recover\/confirm\/?$/,
+    action: 'auth.recovery_complete',
+    entityType: 'session',
+  },
+  { pattern: /^\/auth\/recover\/?$/, action: 'auth.recovery', entityType: 'session' },
   { pattern: /^\/backups?\/?$/, action: 'backup.create', entityType: 'backup', sensitive: true },
 ];
 

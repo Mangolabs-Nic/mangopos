@@ -61,6 +61,7 @@ supabase migration up --db-url $PRODUCTION_DATABASE_URL
 | 003 | Multi-tenant isolation | ✅ Applied — `20260925000200_tenant_isolation_and_stock.sql` |
 | 004 | Audit logging | ✅ Applied — `20261010000000_audit_log.sql` |
 | 004b | API-origin audit writes | ✅ Applied — `20261011000000_audit_api_write.sql` |
+| 004c | Employee auth on Supabase Auth | ✅ Applied — `20261012000000_auth_employees.sql` |
 | 005 | Inventory improvements | 🔲 Pending |
 
 The plan numbers are not the file names: migrations are timestamped, and the audit work

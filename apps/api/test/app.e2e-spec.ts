@@ -26,6 +26,14 @@ describe('AppController (e2e)', () => {
       });
   });
 
+  it('/auth/me without a token is refused', () => {
+    return request(app.getHttpServer()).get('/auth/me').expect(401);
+  });
+
+  it('/auth/login without credentials is a client error, not an upstream call', () => {
+    return request(app.getHttpServer()).post('/auth/login').send({}).expect(400);
+  });
+
   afterEach(async () => {
     await app.close();
   });

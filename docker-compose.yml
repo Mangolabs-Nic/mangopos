@@ -27,6 +27,11 @@ services:
       SUPABASE_URL: http://host.docker.internal:54321
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
       SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY}
+      # Fallback only. With SUPABASE_URL set the API verifies tokens through the
+      # project JWKS, which is what a current Supabase project (ES256) needs.
+      SUPABASE_JWT_SECRET: ${SUPABASE_JWT_SECRET:-}
+      # Required for employee PIN login. Generate with `openssl rand -hex 32`.
+      PIN_PEPPER: ${PIN_PEPPER}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:

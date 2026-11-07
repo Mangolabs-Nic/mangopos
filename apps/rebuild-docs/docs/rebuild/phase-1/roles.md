@@ -80,3 +80,24 @@ Daily operations only.
 - Each user is associated with a business (multi-tenant isolation)
 - Session timeout: 8 hours for cashier, 24 hours for admin/supervisor
 - Password policy: minimum 8 characters, no complexity requirements initially
+
+## Sessions and claims
+
+Authentication happens in Supabase Auth. Every access token carries `user_id`,
+`business_id`, `app_role` and `active`, added by the `custom_access_token_hook`; the API
+guard authorises from those claims and RLS authorises from the live `profiles` row.
+
+| Event | Takes effect |
+| --- | --- |
+| Role change | On the next token refresh (the role travels in the token) |
+| Deactivation | RLS-backed data access stops immediately (`current_business_id()` / `current_role()` require `active`); the API guard sees the `active` claim change at the next refresh |
+| Password / PIN change | Immediately for the changed credential; other sessions are unaffected |
+
+An employee logs in with email and password, or with a business slug and PIN. The PIN is
+only a lookup into Supabase Auth — it is never the account password, never stored in
+clear, and never written to the audit trail. Password recovery is Supabase's built-in
+email flow, so the security-question table from the desktop app is gone.
+
+Session length is the Supabase `jwt_expiry` (one hour by default, refreshed
+automatically). The 8/24-hour distinction above is a policy target, not something the
+current token configuration implements.

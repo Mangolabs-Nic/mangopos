@@ -11,6 +11,7 @@ import type { Response } from 'express';
 import { timingSafeEqual } from 'node:crypto';
 import { AppLogger } from '../common/app-logger.js';
 import { diagnosticsExposureWarning, diagnosticsOpen } from '../common/access-control.js';
+import { Public } from '../auth/public.decorator.js';
 
 /**
  * Support-facing diagnostics: environment summary plus a downloadable log
@@ -23,7 +24,11 @@ import { diagnosticsExposureWarning, diagnosticsOpen } from '../common/access-co
  * `DIAGNOSTICS_PUBLIC` outside production. Without a token they are NOT
  * automatically open — `assertAuthorized` refuses, and `warnMissingToken`
  * makes that explicit at boot.
+ *
+ * It is public to the JWT guard on purpose: it has its own token, and support
+ * needs it precisely when nobody can log in.
  */
+@Public()
 @Controller('diagnostics')
 export class DiagnosticsController {
   constructor(private readonly logger: AppLogger) {}
@@ -43,6 +48,9 @@ export class DiagnosticsController {
         database: Boolean(process.env.DATABASE_URL),
         supabaseUrl: Boolean(process.env.SUPABASE_URL),
         supabaseServiceKey: Boolean(process.env.SUPABASE_SERVICE_KEY),
+        supabaseAnonKey: Boolean(process.env.SUPABASE_ANON_KEY),
+        jwtVerification: Boolean(process.env.SUPABASE_JWT_SECRET || process.env.SUPABASE_URL),
+        pinPepper: Boolean(process.env.PIN_PEPPER),
         logLevel: process.env.LOG_LEVEL ?? 'log',
       },
       logBufferSize: this.logger.bufferCapacity,

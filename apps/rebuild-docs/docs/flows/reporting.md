@@ -76,6 +76,6 @@ sequenceDiagram
 
 | Format | Use case |
 | --- | --- |
-| PDF | Formal reports, printing |
-| Excel | Data analysis, accounting import |
-| CSV | Raw data export |
+| PDF | Implemented (`format=pdf`) |
+| CSV | Implemented (`format=csv`) |
+| Excel | Not implemented; the CSV opens in Excel and keeps `Sin categoría` readable |

@@ -165,9 +165,8 @@ is written at `error` as `audit_write_failed` with the already-redacted entry, s
 Not done yet:
 
 - **Reading the trail over HTTP.** Admin full access is enforced by `audit_log_scoped`,
-  which is the rule that matters. There is no API route yet because the API has no
-  authenticated principal: until an auth layer populates `request.user`, an endpoint would
-  answer 401 to everyone.
+  which is the rule that matters. The API now has an authenticated principal
+  (`JwtAuthGuard`), so this is a route to add, not a missing foundation.
 - **Frontend "Activity" section, CSV/PDF export, real-time notifications for critical
   actions.** The data is there (`metadata.sensitive`, `idx_audit_cursor`); the surface is not.
 

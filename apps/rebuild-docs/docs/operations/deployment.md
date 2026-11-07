@@ -56,8 +56,25 @@ graph LR
 | `SUPABASE_URL` | ✅ | ✅ | Supabase project URL |
 | `SUPABASE_ANON_KEY` | ✅ | ✅ | Supabase anonymous key |
 | `SUPABASE_SERVICE_KEY` | ✅ | ✅ | Supabase service role key |
+| `SUPABASE_JWT_SECRET` | — | — | HS256 fallback for a project without a JWKS URL |
+| `PIN_PEPPER` | ✅ | ✅ | HMAC pepper for the employee PIN blind index (16+ chars, never rotate) |
 | `NODE_ENV` | production | production | Environment mode |
 | `PORT` | auto | auto | Server port (Railway assigns) |
+
+## Supabase Auth configuration
+
+Two settings live in Supabase, not in the API:
+
+1. **Custom access token hook.** Locally it is `[auth.hook.custom_access_token]` in
+   `supabase/config.toml`; hosted it is Dashboard → Authentication → Hooks → *Customize
+   Access Token (JWT) Claims*, pointing at `public.custom_access_token_hook`. Without it
+   every token lacks `user_id` / `business_id` and the API answers `503` on login.
+2. **Email delivery.** Built-in password recovery needs SMTP configured for the project
+   and the frontend origin in *Redirect URLs*. Employee accounts always carry a real
+   email, which is what recovery uses.
+
+After changing the local hook configuration, restart the stack (`supabase stop &&
+supabase start`); a migration alone does not reload GoTrue's settings.
 
 ## Railway deployment
 

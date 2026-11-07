@@ -49,7 +49,10 @@ describe('decideAudit', () => {
       entityType: 'session',
       sensitive: false,
     });
+    expect(decideAudit('POST', '/auth/pin')?.action).toBe('auth.login_pin');
     expect(decideAudit('POST', '/auth/logout')?.action).toBe('auth.logout');
+    expect(decideAudit('POST', '/auth/recover')?.action).toBe('auth.recovery');
+    expect(decideAudit('POST', '/auth/recover/confirm')?.action).toBe('auth.recovery_complete');
     expect(decideAudit('POST', '/backups')).toEqual({
       action: 'backup.create',
       entityType: 'backup',

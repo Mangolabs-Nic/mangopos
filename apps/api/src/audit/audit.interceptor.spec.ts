@@ -164,6 +164,28 @@ describe('AuditInterceptor', () => {
     });
   });
 
+  it('attributes a successful login through the actor the handler named', async () => {
+    const { interceptor, context, next, recorded } = harness();
+    await lastValueFrom(
+      interceptor.intercept(
+        context({
+          method: 'POST',
+          path: '/auth/login',
+          // The guard did not authenticate this request: a login creates the
+          // session, so the handler names the actor once it knows it.
+          auditActor: { userId: 'user-1', businessId: 'biz-1' },
+        }),
+        next(),
+      ),
+    );
+
+    expect(await recorded()).toMatchObject({
+      action: 'auth.login',
+      userId: 'user-1',
+      businessId: 'biz-1',
+    });
+  });
+
   it('records a refused sensitive request and still propagates the error', async () => {
     const { interceptor, context, next, recorded } = harness();
     const failed = throwError(() => new HttpException('forbidden', 403));

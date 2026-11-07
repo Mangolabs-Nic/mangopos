@@ -23,6 +23,8 @@ interface AuditRequest {
   headers?: Record<string, string | string[] | undefined>;
   requestId?: string;
   user?: { userId?: string; businessId?: string; appRole?: string };
+  /** Set by a login handler, before the entry is written. Not authentication. */
+  auditActor?: { userId?: string; businessId?: string };
 }
 
 const MAX_TEXT = 512;
@@ -124,7 +126,7 @@ export class AuditInterceptor implements NestInterceptor {
     status: number,
     durationMs: number,
   ): AuditEntry {
-    const user = request.user;
+    const user = request.auditActor ?? request.user;
     const body = request.body;
 
     // Detail only for the three operations the plan calls out. A login body is

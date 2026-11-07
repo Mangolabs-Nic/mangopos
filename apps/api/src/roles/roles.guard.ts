@@ -17,8 +17,8 @@ import { ROLES_KEY } from './roles.decorator.js';
  *
  * It is deliberately NOT the Supabase JWT `role` claim: that claim carries the
  * *Postgres* role (`authenticated`), which says nothing about what the caller
- * may do. Nothing populates `appRole` yet, so a gated route currently answers
- * 401 rather than silently allowing through.
+ * may do. `JwtAuthGuard` populates `appRole` from the `app_role` claim, which
+ * the access-token hook reads from `profiles.role`.
  */
 export interface AuthenticatedRequest {
   user?: {

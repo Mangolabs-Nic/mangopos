@@ -562,13 +562,19 @@ DO $$
 DECLARE
     biz_a uuid := 'aaaaaaaa-0000-0000-0000-00000000000a';
 BEGIN
-    IF (SELECT count(*) FROM public.audit_log WHERE business_id IS NULL) > 0 THEN
-        RAISE EXCEPTION 'FAIL audit_tenant: % audit rows have no tenant and are invisible to every tenant',
-            (SELECT count(*) FROM public.audit_log WHERE business_id IS NULL);
+    -- Only trigger entries must carry both: an API event (auth.login, a failed
+    -- login for an unknown address) has no row and may have no tenant by design.
+    IF (SELECT count(*) FROM public.audit_log
+         WHERE business_id IS NULL AND metadata->>'source' = 'db_trigger') > 0 THEN
+        RAISE EXCEPTION 'FAIL audit_tenant: % trigger entries have no tenant and are invisible to every tenant',
+            (SELECT count(*) FROM public.audit_log
+              WHERE business_id IS NULL AND metadata->>'source' = 'db_trigger');
     END IF;
-    IF (SELECT count(*) FROM public.audit_log WHERE entity_id IS NULL) > 0 THEN
-        RAISE EXCEPTION 'FAIL audit_entity_id: % audit rows do not record which row changed',
-            (SELECT count(*) FROM public.audit_log WHERE entity_id IS NULL);
+    IF (SELECT count(*) FROM public.audit_log
+         WHERE entity_id IS NULL AND metadata->>'source' = 'db_trigger') > 0 THEN
+        RAISE EXCEPTION 'FAIL audit_entity_id: % trigger entries do not record which row changed',
+            (SELECT count(*) FROM public.audit_log
+              WHERE entity_id IS NULL AND metadata->>'source' = 'db_trigger');
     END IF;
     IF (SELECT count(*) FROM public.audit_log WHERE business_id = biz_a) = 0 THEN
         RAISE EXCEPTION 'FAIL audit_tenant: no audit rows were attributed to the tenant that made them';
@@ -1472,6 +1478,230 @@ BEGIN
     END IF;
 
     RAISE NOTICE 'PASS  the API appends only through audit_append, allowlisted and attributed';
+END $$;
+
+-- Employee PIN auth: a handle, a blind index, a limit and fresh claims ----------
+DO $$
+DECLARE
+    biz     uuid := '99999999-0000-0000-0000-000000000001';
+    u_ok    uuid := '99999999-0000-0000-0000-000000000002';
+    u_off   uuid := '99999999-0000-0000-0000-000000000003';
+    u_prov  uuid := '99999999-0000-0000-0000-000000000004';
+    first_slug text;
+    before_count integer;
+    result  jsonb;
+    hooked  jsonb;
+    i       integer;
+BEGIN
+    -- Every business gets a login handle whether or not the caller supplies one:
+    -- a PIN is only unique inside a business, and the fixtures predate the column.
+    INSERT INTO public.businesses (id, name) VALUES (biz, 'Panadería Niño');
+    SELECT slug INTO first_slug FROM public.businesses WHERE id = biz;
+    IF first_slug !~ '^panaderia-nino-[0-9a-f]{8}$' THEN
+        RAISE EXCEPTION 'FAIL business_slug: got %', first_slug;
+    END IF;
+    BEGIN
+        INSERT INTO public.businesses (id, name, slug)
+        VALUES ('99999999-0000-0000-0000-000000000009', 'Otro', first_slug);
+        RAISE EXCEPTION 'FAIL business_slug_unique: a duplicate slug was accepted';
+    EXCEPTION WHEN unique_violation THEN
+        NULL;
+    END;
+
+    -- The employees are created through `auth.users`, as Supabase would.
+    INSERT INTO auth.users (id, aud, role, email, encrypted_password,
+                            raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+    VALUES (u_ok,  'authenticated', 'authenticated', 'pin.ok@verify.local',
+                crypt('x', gen_salt('bf')), '{}', '{}', now(), now()),
+           (u_off, 'authenticated', 'authenticated', 'pin.off@verify.local',
+                crypt('x', gen_salt('bf')), '{}', '{}', now(), now());
+
+    UPDATE public.profiles SET business_id = biz, role = 'cashier' WHERE id = u_ok;
+    UPDATE public.profiles SET business_id = biz, role = 'cashier' WHERE id = u_off;
+
+    INSERT INTO public.employee_pins (user_id, business_id, pin_lookup)
+    VALUES (u_ok, biz, repeat('a', 64)), (u_off, biz, repeat('b', 64));
+
+    -- A wrong digest is the same answer as an unknown business: no enumeration.
+    result := public.employee_pin_login('panaderia-nino-' || right(first_slug, 8),
+                                        repeat('f', 64), repeat('1', 64));
+    IF result ->> 'status' <> 'invalid' THEN
+        RAISE EXCEPTION 'FAIL pin_invalid: a wrong PIN returned %', result;
+    END IF;
+
+    -- The right digest resolves to the account and its email, which is what the
+    -- API exchanges for a session.
+    result := public.employee_pin_login(first_slug, repeat('a', 64), repeat('2', 64));
+    IF result ->> 'status' <> 'ok' OR result ->> 'email' <> 'pin.ok@verify.local' THEN
+        RAISE EXCEPTION 'FAIL pin_ok: a correct PIN returned %', result;
+    END IF;
+    IF (result ->> 'user_id')::uuid <> u_ok THEN
+        RAISE EXCEPTION 'FAIL pin_user: resolved the wrong account: %', result;
+    END IF;
+
+    -- A deactivated employee is not a login, whatever the PIN.
+    UPDATE public.profiles SET active = false WHERE id = u_off;
+    result := public.employee_pin_login(first_slug, repeat('b', 64), repeat('3', 64));
+    IF result ->> 'status' <> 'invalid' THEN
+        RAISE EXCEPTION 'FAIL pin_inactive: an inactive employee returned %', result;
+    END IF;
+    UPDATE public.profiles SET active = true WHERE id = u_off;
+
+    -- Ten failures from one address lock the next attempt, and the answer says
+    -- how long to wait.
+    FOR i IN 1..10 LOOP
+        result := public.employee_pin_login(first_slug, repeat('f', 64), repeat('4', 64));
+        IF result ->> 'status' <> 'invalid' THEN
+            RAISE EXCEPTION 'FAIL pin_limit: attempt % returned %', i, result;
+        END IF;
+    END LOOP;
+    result := public.employee_pin_login(first_slug, repeat('f', 64), repeat('4', 64));
+    IF result ->> 'status' <> 'locked' OR (result ->> 'retry_after_seconds')::int < 1 THEN
+        RAISE EXCEPTION 'FAIL pin_limit: the 11th attempt returned %', result;
+    END IF;
+
+    RAISE NOTICE 'PASS  a PIN resolves inside its business, refuses the inactive, and locks after 10 failures';
+END $$;
+
+-- The claim hook and the roles that may reach it --------------------------------
+DO $$
+DECLARE
+    biz    uuid := '99999999-0000-0000-0000-000000000021';
+    member uuid := '99999999-0000-0000-0000-000000000022';
+    hooked jsonb;
+    event  jsonb;
+BEGIN
+    INSERT INTO public.businesses (id, name, slug) VALUES (biz, 'Claims shop', 'claims-shop-verify');
+    INSERT INTO auth.users (id, aud, role, email, encrypted_password,
+                            raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+    VALUES (member, 'authenticated', 'authenticated', 'claims@verify.local',
+            crypt('x', gen_salt('bf')), '{}', '{}', now(), now());
+    UPDATE public.profiles SET business_id = biz, role = 'supervisor' WHERE id = member;
+
+    event := jsonb_build_object(
+        'user_id', member,
+        'claims', jsonb_build_object('sub', member, 'role', 'authenticated'));
+    hooked := public.custom_access_token_hook(event);
+
+    IF hooked #>> '{claims,user_id}' <> member::text THEN
+        RAISE EXCEPTION 'FAIL claims_user_id: %', hooked;
+    END IF;
+    IF hooked #>> '{claims,business_id}' <> biz::text THEN
+        RAISE EXCEPTION 'FAIL claims_business_id: %', hooked;
+    END IF;
+    IF hooked #>> '{claims,app_role}' <> 'supervisor' THEN
+        RAISE EXCEPTION 'FAIL claims_role: %', hooked;
+    END IF;
+    IF (hooked #>> '{claims,active}')::boolean IS NOT TRUE THEN
+        RAISE EXCEPTION 'FAIL claims_active: %', hooked;
+    END IF;
+
+    -- No profile: the token is left without tenant claims rather than inventing one.
+    hooked := public.custom_access_token_hook(jsonb_build_object(
+        'user_id', '99999999-0000-0000-0000-000000000029',
+        'claims', '{}'::jsonb));
+    IF hooked -> 'claims' ? 'business_id' THEN
+        RAISE EXCEPTION 'FAIL claims_orphan: a profile-less user got a tenant claim: %', hooked;
+    END IF;
+
+    -- Clients can neither call the hook nor read the blind index; the API can
+    -- resolve a PIN and set one, but only through the two functions.
+    IF has_function_privilege('anon', 'public.custom_access_token_hook(jsonb)', 'EXECUTE')
+       OR has_function_privilege('authenticated', 'public.custom_access_token_hook(jsonb)', 'EXECUTE') THEN
+        RAISE EXCEPTION 'FAIL auth_grants: a client can run the claim hook';
+    END IF;
+    IF has_function_privilege('anon', 'public.employee_pin_login(text,text,text)', 'EXECUTE')
+       OR has_function_privilege('authenticated', 'public.employee_pin_login(text,text,text)', 'EXECUTE') THEN
+        RAISE EXCEPTION 'FAIL auth_grants: a client can probe PINs';
+    END IF;
+    IF NOT has_function_privilege('service_role', 'public.employee_pin_login(text,text,text)', 'EXECUTE')
+       OR NOT has_function_privilege('service_role', 'public.set_employee_pin(uuid,text)', 'EXECUTE') THEN
+        RAISE EXCEPTION 'FAIL auth_grants: the server cannot resolve or set a PIN';
+    END IF;
+    IF has_table_privilege('authenticated', 'public.employee_pins', 'SELECT')
+       OR has_table_privilege('authenticated', 'public.employee_pins', 'INSERT')
+       OR has_table_privilege('anon', 'public.employee_pins', 'SELECT')
+       OR has_table_privilege('service_role', 'public.employee_pins', 'SELECT') THEN
+        RAISE EXCEPTION 'FAIL auth_grants: a role can read the PIN blind index directly';
+    END IF;
+    IF has_table_privilege('authenticated', 'public.pin_attempts', 'SELECT') THEN
+        RAISE EXCEPTION 'FAIL auth_grants: a client can read the attempt ledger';
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_auth_admin')
+       AND NOT has_function_privilege(
+             'supabase_auth_admin', 'public.custom_access_token_hook(jsonb)', 'EXECUTE') THEN
+        RAISE EXCEPTION 'FAIL auth_grants: GoTrue cannot call the claim hook';
+    END IF;
+
+    RAISE NOTICE 'PASS  the claim hook names the tenant, and only the server can resolve a PIN';
+END $$;
+
+-- Provisioned employees, deactivation and the PIN audit -------------------------
+DO $$
+DECLARE
+    biz      uuid := '99999999-0000-0000-0000-000000000031';
+    owner    uuid := '99999999-0000-0000-0000-000000000032';
+    prov     uuid := '99999999-0000-0000-0000-000000000033';
+    before_count integer;
+    after_count  integer;
+BEGIN
+    INSERT INTO public.businesses (id, name, slug) VALUES (biz, 'Hiring shop', 'hiring-shop-verify');
+    INSERT INTO auth.users (id, aud, role, email, encrypted_password,
+                            raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+    VALUES (owner, 'authenticated', 'authenticated', 'owner.hire@verify.local',
+            crypt('x', gen_salt('bf')), '{}', '{}', now(), now());
+    UPDATE public.profiles SET business_id = biz, role = 'admin' WHERE id = owner;
+
+    -- An employee created by the admin API is flagged in app_metadata, which the
+    -- client cannot write. The trigger must not provision a throwaway tenant for
+    -- it: the API attaches it to the admin's business in a second step.
+    SELECT count(*) INTO before_count FROM public.businesses;
+    INSERT INTO auth.users (id, aud, role, email, encrypted_password,
+                            raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+    VALUES (prov, 'authenticated', 'authenticated', 'prov@verify.local',
+            crypt('x', gen_salt('bf')), '{"mangopos_provisioned":"true"}', '{}', now(), now());
+    SELECT count(*) INTO after_count FROM public.businesses;
+
+    IF after_count <> before_count THEN
+        RAISE EXCEPTION 'FAIL provisioned_signup: an admin-created user provisioned a tenant';
+    END IF;
+    IF EXISTS (SELECT 1 FROM public.profiles WHERE id = prov) THEN
+        RAISE EXCEPTION 'FAIL provisioned_signup: an admin-created user got a profile before provisioning';
+    END IF;
+
+    -- After provisioning it is a normal member: the PIN can be set and the change
+    -- is audited without the digest ever being recorded.
+    PERFORM public.provision_user_for_business(prov, biz, 'cashier');
+    PERFORM public.set_employee_pin(prov, repeat('d', 64));
+
+    IF NOT EXISTS (
+        SELECT 1 FROM public.audit_log
+         WHERE action = 'profiles.pin_changed' AND entity_id = prov
+           AND (metadata ->> 'sensitive')::boolean
+    ) THEN
+        RAISE EXCEPTION 'FAIL pin_audit: the PIN change was not recorded';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM public.audit_log
+         WHERE action = 'profiles.pin_changed' AND entity_id = prov
+           AND (old_values ? 'pin_lookup' OR new_values ? 'pin_lookup')
+    ) THEN
+        RAISE EXCEPTION 'FAIL pin_audit: the blind index reached the audit trail';
+    END IF;
+
+    -- Deactivation bites on the next request, not on the next token refresh.
+    UPDATE public.profiles SET active = false WHERE id = prov;
+    PERFORM set_config('request.jwt.claim.sub', prov::text, true);
+    IF public.current_business_id() IS NOT NULL THEN
+        RAISE EXCEPTION 'FAIL inactive_tenant: a deactivated profile still resolved a tenant';
+    END IF;
+    IF public.current_role() IS NOT NULL THEN
+        RAISE EXCEPTION 'FAIL inactive_role: a deactivated profile still resolved a role';
+    END IF;
+    UPDATE public.profiles SET active = true WHERE id = prov;
+
+    RESET ROLE;
+    RAISE NOTICE 'PASS  admin-created employees are provisioned, not given a tenant, and deactivation is immediate';
 END $$;
 
 ROLLBACK;
