@@ -1,53 +1,27 @@
 import {
-  CanActivate,
-  ExecutionContext,
+  ForbiddenException,
   Injectable,
+  ServiceUnavailableException,
   UnauthorizedException,
+  type CanActivate,
+  type ExecutionContext,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import type { Request } from 'express';
-import type { Role } from '../roles/role.js';
+import type { AuthenticatedRequest } from '../roles/roles.guard.js';
+import { InactiveAccountError, JwtConfigError, JwtVerifier } from './jwt-verifier.js';
 import { IS_PUBLIC_KEY } from './public.decorator.js';
-import { JwtVerificationService } from './jwt-verification.service.js';
-import { ProfilesService } from './profiles.service.js';
-
-/** The principal a request carries once the guard has authenticated it. */
-export interface AuthenticatedUser {
-  sub: string;
-  appRole: Role;
-  businessId: string;
-}
-
-declare global {
-  // eslint-disable-next-line @typescript-eslint/no-namespace
-  namespace Express {
-    interface Request {
-      user?: AuthenticatedUser;
-    }
-  }
-}
-
-interface AuthenticatedRequest extends Request {
-  user?: AuthenticatedUser;
-}
-
-/** A single `Bearer <token>` credential; anything else is not a bearer token. */
-const BEARER = /^Bearer (\S+)$/i;
 
 /**
- * Global authentication guard. Every route requires a valid Supabase token
- * unless it is marked `@Public()`.
+ * Authenticates every route except the ones marked `@Public()`.
  *
- * On success it attaches `request.user` = `{ sub, appRole, businessId }`, which
- * `RolesGuard` consumes for role checks; the order of the two global guards in
- * `app.module.ts` is what guarantees the principal exists by then.
+ * Global and fail-closed: a route added without a decorator requires a token.
+ * It runs before `RolesGuard`, so that guard can trust `request.user`.
  */
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
-    private readonly verification: JwtVerificationService,
-    private readonly profiles: ProfilesService,
+    private readonly verifier: JwtVerifier,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -57,13 +31,35 @@ export class JwtAuthGuard implements CanActivate {
     ]);
     if (isPublic) return true;
 
-    const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
-    const token = BEARER.exec(request.headers.authorization ?? '')?.[1];
+    const request = context.switchToHttp().getRequest<AuthenticatedRequest & { headers?: Record<string, unknown> }>();
+    const header = request.headers?.authorization;
+    const token =
+      typeof header === 'string' && header.toLowerCase().startsWith('bearer ')
+        ? header.slice(7).trim()
+        : null;
+
     if (!token) throw new UnauthorizedException('authentication required');
 
-    const { sub } = await this.verification.verify(token);
-    const { appRole, businessId } = await this.profiles.resolve(sub);
-    request.user = { sub, appRole, businessId };
-    return true;
+    try {
+      const claims = await this.verifier.verify(token);
+      request.user = {
+        userId: claims.userId,
+        businessId: claims.businessId,
+        appRole: claims.appRole,
+      };
+      return true;
+    } catch (error) {
+      // A missing configuration is an outage, not a bad password: answering 401
+      // would send every client into its login loop.
+      if (error instanceof JwtConfigError) {
+        throw new ServiceUnavailableException('authentication is not configured');
+      }
+      // Deactivated accounts are refused with 403: the token is valid, the
+      // person is not allowed. A 401 reads as an expired session and loops.
+      if (error instanceof InactiveAccountError) {
+        throw new ForbiddenException('account is inactive');
+      }
+      throw new UnauthorizedException('invalid or expired session');
+    }
   }
 }

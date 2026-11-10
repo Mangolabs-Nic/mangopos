@@ -14,6 +14,22 @@ right now (`apps/api`). Anything listed later in this document is not implemente
 | GET | `/health` | none | Liveness plus whether `DATABASE_URL` is set |
 | GET | `/diagnostics` | `DIAGNOSTICS_TOKEN` or `DIAGNOSTICS_PUBLIC` | Environment summary for support |
 | GET | `/diagnostics/logs?limit=N` | `DIAGNOSTICS_TOKEN` or `DIAGNOSTICS_PUBLIC` | Downloadable log bundle |
+| POST | `/auth/login` | none | Email/password grant; returns a Supabase session |
+| POST | `/auth/pin` | none | Business slug + employee PIN; returns a Supabase session |
+| POST | `/auth/logout` | Bearer JWT | Revokes the session |
+| POST | `/auth/recover` | none | Sends the built-in recovery email (always `202`) |
+| POST | `/auth/recover/confirm` | none | Sets a new password with the recovery token |
+| GET | `/auth/me` | Bearer JWT | The principal the token carries |
+| POST | `/auth/employees` | Admin | Creates the auth user, profile and PIN |
+| PUT | `/auth/employees/:id/pin` | Admin | Resets an employee PIN |
+| GET | `/reports/sales` | Admin, Supervisor | Sales totals per day/week/month |
+| GET | `/reports/inventory` | Admin, Supervisor | Inventory valuation |
+| GET | `/reports/expenses` | Admin, Supervisor | Expense breakdown by category |
+| GET | `/reports/profit` | Admin, Supervisor | Revenue, COGS, expenses, net profit |
+| GET | `/reports/sales/export` | Admin, Supervisor | Sales report as CSV or PDF |
+| GET | `/reports/inventory/export` | Admin, Supervisor | Inventory report as CSV or PDF |
+| GET | `/reports/expenses/export` | Admin, Supervisor | Expense report as CSV or PDF |
+| GET | `/reports/profit/export` | Admin, Supervisor | Profit report as CSV or PDF |
 
 ## Logging
 
@@ -43,6 +59,11 @@ duration. Every response carries an `x-request-id` header (also echoed as
 | `DIAGNOSTICS_TOKEN` | unset | When set, `/diagnostics*` requires the `x-diagnostics-token` header |
 | `DIAGNOSTICS_PUBLIC` | unset | Opens `/diagnostics*` without a token outside production |
 | `CORS_ALLOWED_ORIGINS` | see [CORS](#cors) | Comma-separated origins allowed to call the API |
+| `SUPABASE_URL` | — | GoTrue and PostgREST base URL |
+| `SUPABASE_ANON_KEY` | — | Public key for the password/recovery/verify calls |
+| `SUPABASE_SERVICE_KEY` | — | Server only: admin user calls and RPCs |
+| `SUPABASE_JWT_SECRET` | unset | HS256 fallback, used only when `SUPABASE_URL` is unset |
+| `PIN_PEPPER` | unset | HMAC pepper for the PIN blind index (16+ chars) |
 
 Secrets are masked before writing: object keys matching `pin`, `password`, `token`,
 `secret`, `authorization`, `cookie` and `api_key` become `***`, and inline forms such as
@@ -84,13 +105,77 @@ Set `DIAGNOSTICS_TOKEN` before exposing the API to support.
 
 ## Authentication
 
-All API requests require a JWT token in the Authorization header:
+Every request except `/health`, `/diagnostics*` and the login/recovery endpoints requires a
+Supabase access token:
 
 ```
-Authorization: Bearer <jwt_token>
+Authorization: Bearer <access_token>
 ```
 
-Token is obtained via Supabase Auth login endpoint.
+The token is issued by Supabase Auth and verified by `JwtAuthGuard` against the project's
+JWKS (ES256/RS256). `SUPABASE_JWT_SECRET` is only a fallback for a project with no
+`SUPABASE_URL`; using it against an ES256 project would reject every real token. The token
+has to carry the claims added by the `custom_access_token_hook`:
+
+| Claim | Source | Used for |
+| --- | --- | --- |
+| `sub` | Supabase Auth | The user id |
+| `user_id` | hook, mirrors `sub` | The actor recorded in the audit trail |
+| `business_id` | `profiles.business_id` | Tenant scope |
+| `app_role` | `profiles.role` | `RolesGuard` |
+| `active` | `profiles.active` | Refuses a deactivated account |
+
+Answers:
+
+| Status | When |
+| --- | --- |
+| `401` | No token, bad signature, expired, or a token without the claims above |
+| `403` | The account is inactive, or the role is not allowed on the route |
+| `503` | JWT verification is not configured, or the claims hook is not enabled |
+
+Two different freshness rules, on purpose. A **role change** applies when the token is
+refreshed (`jwt_expiry`, one hour by default), because the role travels in the token.
+**Deactivation** stops RLS-backed data access immediately: every policy resolves tenancy
+through `current_business_id()` / `current_role()`, and both require `active`. The `active`
+claim in an already-issued token is a snapshot, so this API refuses the account (`403`) at
+the next refresh; to cut an open session sooner, revoke that user's sessions in Supabase
+Auth.
+
+### Employee PIN login
+
+The legacy PIN flow is kept, but it is no longer the authentication mechanism - it is a
+lookup into Supabase Auth:
+
+1. `POST /auth/pin { "business": "mi-tienda", "pin": "4821" }`
+2. The API computes `HMAC-SHA256(pin, PIN_PEPPER)`. The PIN itself is never stored, logged
+   or sent to the database.
+3. `employee_pin_login(slug, digest, address)` resolves the business and the active
+   employee, and records the attempt. Ten failures from one address in fifteen minutes
+   lock it; the answer is `429` with `retry_after_seconds`.
+4. The API generates a one-time magic link for the resolved email and immediately
+   exchanges it for a session. No mail is sent.
+5. The session is the same JWT, with the same claims, as an email/password login.
+
+The PIN is **not** the password. Changing the password (or recovering it) does not break
+the PIN, and changing the PIN does not touch the password. Every employee therefore has a
+real email and can use Supabase's built-in recovery.
+
+`PIN_PEPPER` is required (16+ characters). Without it the endpoints answer `503` rather
+than falling back to an unpeppered digest. Changing the pepper invalidates every PIN.
+
+### Recovery
+
+`POST /auth/recover { "email": "..." }` always answers `202`, whether or not the address
+exists, so it cannot be used to enumerate accounts. Supabase sends the built-in recovery
+mail. The link points at GoTrue's `/auth/v1/verify`, which redirects to `redirect_to` (or
+the project's `site_url`) with `#access_token=...&type=recovery` in the fragment; the
+frontend reads that token and calls
+`POST /auth/recover/confirm { "access_token": "...", "password": "..." }`.
+
+`redirect_to` must be listed in `additional_redirect_urls` (`supabase/config.toml` locally,
+Authentication → URL Configuration when hosted). An unlisted URL is replaced by `site_url`
+without an error. Employees created through the API always have a real email, which is what
+makes this work for PIN-only staff.
 
 ## CORS
 
@@ -125,11 +210,69 @@ origin as part of the release.
 
 ### Auth
 
+Implemented, as listed under [Implemented today](#implemented-today): `POST /auth/login`,
+`POST /auth/pin`, `POST /auth/logout`, `POST /auth/recover`,
+`POST /auth/recover/confirm`, `GET /auth/me`, `POST /auth/employees` and
+`PUT /auth/employees/:id/pin`.
+
+The routes below this point are still the target API.
+
+### Reports
+
+Implemented, `admin` and `supervisor` only; a `cashier` gets `403`. Reads are never
+written to the audit trail.
+
 | Method | Endpoint | Description |
 | --- | --- | --- |
-| POST | `/auth/login` | Login with email/password |
-| POST | `/auth/logout` | Invalidate current session |
-| GET | `/auth/me` | Get current user profile |
+| GET | `/reports/sales` | Sales totals per bucket |
+| GET | `/reports/inventory` | Inventory valuation |
+| GET | `/reports/expenses` | Expense breakdown by category |
+| GET | `/reports/profit` | Revenue, COGS, expenses and net profit |
+| GET | `/reports/sales/export` | The same report as a file |
+| GET | `/reports/inventory/export` | The same report as a file |
+| GET | `/reports/expenses/export` | The same report as a file |
+| GET | `/reports/profit/export` | The same report as a file |
+
+| Parameter | Where | Required | Meaning |
+| --- | --- | --- | --- |
+| `from` | query | yes, except inventory | Inclusive local date, `YYYY-MM-DD` |
+| `to` | query | yes, except inventory | Inclusive local date, `YYYY-MM-DD` |
+| `granularity` | query | no (`day`) | `day`, `week` or `month` for sales |
+| `format` | export only | no (`csv`) | `csv` or `pdf` |
+
+`from` and `to` are interpreted in `businesses.timezone` (default `America/Managua`), not
+UTC. Only sales whose `sales.currency` matches the business currency are included; the
+schema has no exchange-rate table yet.
+
+Responses are the rows themselves, not the `{ data, meta }` envelope used by the target API:
+
+```json
+GET /reports/profit?from=2026-11-01&to=2026-11-07
+
+{
+  "currency": "NIO",
+  "sale_count": 12,
+  "revenue": 8450,
+  "tax": 0,
+  "cogs": 5120,
+  "gross_profit": 3330,
+  "expenses": 1200,
+  "net_profit": 2130
+}
+```
+
+- Sales: array of `bucket`, `sale_count`, `voided_count`, `subtotal`, `tax`, `total`.
+  Voided sales are counted but excluded from every sum.
+- Inventory: one row with `product_count`, `service_count`, `unit_count`, `cost_value`,
+  `retail_value`, `low_stock_count`.
+- Expenses: array of `category`, `entry_count`, `total`.
+- Profit: one row as above. COGS uses `sale_items.unit_cost`, the cost snapshotted when
+  the line was written, so editing a product today does not rewrite past profit.
+
+Exports send `content-disposition: attachment` with a filename that includes the range,
+for example `sales-2026-11-01_2026-11-07.csv`.
+
+The routes below this point are still the target API.
 
 ### Sales
 
@@ -160,15 +303,6 @@ origin as part of the release.
 | POST | `/expenses` | Create expense | All |
 | PUT | `/expenses/:id` | Update expense | Admin, Supervisor |
 | DELETE | `/expenses/:id` | Delete expense | Admin |
-
-### Reports
-
-| Method | Endpoint | Description | Roles |
-| --- | --- | --- | --- |
-| GET | `/reports/sales` | Sales report (date range) | Admin, Supervisor |
-| GET | `/reports/sales/export` | Export sales report | Admin, Supervisor |
-| GET | `/reports/inventory` | Inventory report | Admin, Supervisor |
-| GET | `/reports/financial` | Financial summary | Admin |
 
 ### Users
 
