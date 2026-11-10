@@ -8,11 +8,22 @@ import { JwtAuthGuard } from './auth/jwt-auth.guard.js';
 import { LoggerModule } from './common/logger.module.js';
 import { RequestLogger } from './common/request-logger.js';
 import { DiagnosticsController } from './diagnostics/diagnostics.controller.js';
+import { ExpensesModule } from './expenses/expenses.module.js';
+import { InventoryModule } from './inventory/inventory.module.js';
 import { ReportsModule } from './reports/reports.module.js';
 import { RolesGuard } from './roles/roles.guard.js';
+import { SalesModule } from './sales/sales.module.js';
 
 @Module({
-  imports: [LoggerModule, AuditModule, AuthModule, ReportsModule],
+  imports: [
+    LoggerModule,
+    AuditModule,
+    AuthModule,
+    ReportsModule,
+    SalesModule,
+    InventoryModule,
+    ExpensesModule,
+  ],
   controllers: [AppController, DiagnosticsController],
   providers: [
     AppService,

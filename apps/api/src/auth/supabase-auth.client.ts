@@ -11,6 +11,8 @@ export class SupabaseAuthError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
+    /** The upstream message, when there is one. Never surfaced verbatim. */
+    readonly detail = '',
   ) {
     super(`supabase auth error ${status}`);
   }
@@ -44,6 +46,7 @@ export class SupabaseAuthClient {
     init: RequestInit,
     key: string,
     bearer?: string,
+    extraHeaders?: Record<string, string>,
   ): Promise<T> {
     if (!this.configured) {
       throw new SupabaseAuthError(503, 'auth_not_configured');
@@ -55,6 +58,7 @@ export class SupabaseAuthClient {
         apikey: key,
         authorization: `Bearer ${bearer ?? key}`,
         'content-type': 'application/json',
+        ...extraHeaders,
       },
       signal: AbortSignal.timeout(5000),
     });
@@ -62,14 +66,17 @@ export class SupabaseAuthClient {
     const text = await response.text();
     if (!response.ok) {
       let code = 'upstream_error';
+      let detail = '';
       try {
         const body = JSON.parse(text) as Record<string, unknown>;
         const candidate = body.error_code ?? body.code ?? body.msg ?? body.message;
         if (typeof candidate === 'string') code = candidate.slice(0, 120);
+        const message = body.message ?? body.details ?? body.hint;
+        if (typeof message === 'string') detail = message.slice(0, 300);
       } catch {
         // A non-JSON error body is not worth reading.
       }
-      throw new SupabaseAuthError(response.status, code);
+      throw new SupabaseAuthError(response.status, code, detail);
     }
 
     if (text.length === 0) return {} as T;
@@ -201,6 +208,32 @@ export class SupabaseAuthClient {
       { method: 'POST', body: JSON.stringify(args) },
       this.anonKey,
       accessToken,
+    );
+  }
+
+  /**
+   * A PostgREST table request with the caller's own JWT.
+   *
+   * Writes must go through the caller: RLS and the tenant triggers decide what
+   * the row may contain, and the service key would hand every role the right to
+   * write rows the policies were written to refuse.
+   */
+  restAs<T>(
+    accessToken: string,
+    method: string,
+    path: string,
+    body?: unknown,
+    prefer?: string,
+  ): Promise<T> {
+    return this.call<T>(
+      this.rest(path),
+      {
+        method,
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      },
+      this.anonKey,
+      accessToken,
+      prefer ? { prefer } : undefined,
     );
   }
 
