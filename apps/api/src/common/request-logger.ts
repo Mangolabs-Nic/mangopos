@@ -2,6 +2,11 @@ import { Injectable, NestMiddleware } from '@nestjs/common';
 import type { NextFunction, Request, Response } from 'express';
 import { AppLogger } from './app-logger.js';
 
+/** The request id is attached to the request so audit entries can cite it. */
+export interface RequestWithId extends Request {
+  requestId?: string;
+}
+
 /**
  * One structured line per completed HTTP request: method, path, status,
  * duration and a request id echoed back in `x-request-id` so a user-reported
@@ -11,8 +16,9 @@ import { AppLogger } from './app-logger.js';
 export class RequestLogger implements NestMiddleware {
   constructor(private readonly logger: AppLogger) {}
 
-  use(req: Request, res: Response, next: NextFunction): void {
+  use(req: RequestWithId, res: Response, next: NextFunction): void {
     const requestId = this.logger.newRequestId();
+    req.requestId = requestId;
     res.setHeader('x-request-id', requestId);
     const startedAt = process.hrtime.bigint();
 

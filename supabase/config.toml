@@ -161,7 +161,15 @@ site_url = "http://127.0.0.1:3000"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
 # external_url = ""
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
-additional_redirect_urls = ["https://127.0.0.1:3000"]
+# Both schemes are listed for the local frontend: recovery links are built from this
+# list, and an unlisted URL silently falls back to site_url. The `/**` patterns allow
+# application routes such as `/reset`, not only the origin.
+additional_redirect_urls = [
+  "http://127.0.0.1:3000",
+  "http://127.0.0.1:3000/**",
+  "https://127.0.0.1:3000",
+  "https://127.0.0.1:3000/**",
+]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to auth.external_url.
@@ -194,6 +202,13 @@ password_requirements = ""
 # rp_display_name = "Supabase"
 # rp_id = "localhost"
 # rp_origins = ["http://127.0.0.1:3000"]
+
+# Adds user_id, business_id, app_role and active to every access token. The API
+# refuses a token without them, so this is required, not optional. Hosted
+# projects configure the same function in Dashboard > Authentication > Hooks.
+[auth.hook.custom_access_token]
+enabled = true
+uri = "pg-functions://postgres/public/custom_access_token_hook"
 
 [auth.rate_limit]
 # Number of emails that can be sent per hour. Requires auth.email.smtp to be enabled.
