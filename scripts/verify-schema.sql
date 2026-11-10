@@ -936,6 +936,94 @@ BEGIN
     RAISE NOTICE 'PASS  a shop that is configured but has not sold is kept on reassignment';
 END $$;
 
+-- Creating a sale --------------------------------------------------------------
+-- A sale and its lines are written by one function whose only money-adjacent
+-- parameter is the tax. There is no price, no subtotal and no total to send, so a
+-- client cannot invent a total; what it does send is checked against the shelf.
+DO $$
+DECLARE
+    biz       uuid := 'dddddddd-eeee-eeee-eeee-000000000000';
+    u_cashier uuid := 'dddddddd-eeee-eeee-eeee-000000000001';
+    u_other   uuid := 'dddddddd-eeee-eeee-eeee-000000000002';
+    coffee    uuid := 'dddddddd-eeee-eeee-eeee-000000000010';
+    retired   uuid := 'dddddddd-eeee-eeee-eeee-000000000011';
+    ticket    jsonb;
+    stock_now integer;
+BEGIN
+    INSERT INTO public.businesses (id, name) VALUES (biz, 'Sale shop');
+    INSERT INTO auth.users (id, aud, role, email, encrypted_password,
+                            raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+    VALUES (u_cashier, 'authenticated', 'authenticated', 'sale-cashier@verify.local',
+                crypt('x', gen_salt('bf')), '{}', '{}', now(), now()),
+           (u_other,   'authenticated', 'authenticated', 'sale-other@verify.local',
+                crypt('x', gen_salt('bf')), '{}', '{}', now(), now());
+
+    UPDATE public.profiles SET business_id = biz, role = 'cashier' WHERE id IN (u_cashier, u_other);
+
+    INSERT INTO public.products (id, business_id, name, price, stock, active) VALUES
+        (coffee,  biz, 'Coffee',  10, 5, true),
+        (retired, biz, 'Retired', 10, 5, false);
+
+    PERFORM set_config('request.jwt.claim.sub', u_cashier::text, true);
+    SET LOCAL ROLE authenticated;
+
+    ticket := public.create_sale(
+        biz, u_cashier,
+        jsonb_build_array(jsonb_build_object('product_id', coffee, 'quantity', 2)),
+        0.50, NULL);
+
+    IF (ticket ->> 'subtotal')::numeric <> 20
+       OR (ticket ->> 'tax')::numeric <> 0.50
+       OR (ticket ->> 'total')::numeric <> 20.50 THEN
+        RAISE EXCEPTION 'FAIL sale_totals: got subtotal %, tax %, total %',
+            ticket ->> 'subtotal', ticket ->> 'tax', ticket ->> 'total';
+    END IF;
+    IF jsonb_array_length(ticket -> 'sale_items') <> 1
+       OR (ticket -> 'sale_items' -> 0 ->> 'unit_price')::numeric <> 10 THEN
+        RAISE EXCEPTION 'FAIL sale_lines: the catalogue price was not used: %', ticket;
+    END IF;
+
+    SELECT stock INTO stock_now FROM public.products WHERE id = coffee;
+    IF stock_now <> 3 THEN
+        RAISE EXCEPTION 'FAIL sale_stock_deducted: expected 3 left, saw %', stock_now;
+    END IF;
+
+    -- A cashier cannot hang the ticket on somebody else's name.
+    BEGIN
+        PERFORM public.create_sale(
+            biz, u_other,
+            jsonb_build_array(jsonb_build_object('product_id', coffee, 'quantity', 1)),
+            0, NULL);
+        RAISE EXCEPTION 'FAIL sale_attribution: a sale was attributed to another user';
+    EXCEPTION WHEN insufficient_privilege THEN
+        NULL;
+    END;
+
+    -- The shelf, not the request, decides.
+    BEGIN
+        PERFORM public.create_sale(
+            biz, u_cashier,
+            jsonb_build_array(jsonb_build_object('product_id', coffee, 'quantity', 50)),
+            0, NULL);
+        RAISE EXCEPTION 'FAIL sale_stock: sold more than the shelf held';
+    EXCEPTION WHEN check_violation THEN
+        NULL;
+    END;
+
+    BEGIN
+        PERFORM public.create_sale(
+            biz, u_cashier,
+            jsonb_build_array(jsonb_build_object('product_id', retired, 'quantity', 1)),
+            0, NULL);
+        RAISE EXCEPTION 'FAIL sale_inactive: sold a retired product';
+    EXCEPTION WHEN check_violation THEN
+        NULL;
+    END;
+
+    RESET ROLE;
+    RAISE NOTICE 'PASS  a sale is priced by the catalogue, deducts stock, and refuses a foreign actor or a short shelf';
+END $$;
+
 -- The role matrix, asserted from real client sessions -----------------------------
 -- Every tenant table used to have one FOR ALL policy, so a cashier could rewrite the
 -- ledger inside their own business. Each cell below is asserted by running it.
