@@ -11,7 +11,8 @@ right now (`apps/api`). Anything listed later in this document is not implemente
 
 | Method | Endpoint | Auth | Description |
 | --- | --- | --- | --- |
-| GET | `/health` | none | Liveness plus whether `DATABASE_URL` is set |
+| GET | `/health` | Bearer JWT | Liveness plus whether `DATABASE_URL` is set |
+| GET | `/auth/health` | none | The unauthenticated probe used by the container healthcheck |
 | GET | `/diagnostics` | `DIAGNOSTICS_TOKEN` or `DIAGNOSTICS_PUBLIC` | Environment summary for support |
 | GET | `/diagnostics/logs?limit=N` | `DIAGNOSTICS_TOKEN` or `DIAGNOSTICS_PUBLIC` | Downloadable log bundle |
 | POST | `/auth/login` | none | Email/password grant; returns a Supabase session |
@@ -22,6 +23,20 @@ right now (`apps/api`). Anything listed later in this document is not implemente
 | GET | `/auth/me` | Bearer JWT | The principal the token carries |
 | POST | `/auth/employees` | Admin | Creates the auth user, profile and PIN |
 | PUT | `/auth/employees/:id/pin` | Admin | Resets an employee PIN |
+| GET | `/sales` | Bearer JWT | List sales with their lines |
+| GET | `/sales/:id` | Bearer JWT | One sale with its lines |
+| POST | `/sales` | Bearer JWT | Record a sale |
+| POST | `/sales/:id/void` | Admin, Supervisor | Void a sale, with a reason |
+| GET | `/inventory` | Bearer JWT | List the catalogue |
+| GET | `/inventory/:id` | Bearer JWT | One product |
+| POST | `/inventory` | Admin, Supervisor | Create a product |
+| PUT | `/inventory/:id` | Admin, Supervisor | Update a product (not its stock) |
+| DELETE | `/inventory/:id` | Admin | Delete a product with no sales history |
+| POST | `/inventory/adjust` | Admin, Supervisor | Record a stock movement |
+| GET | `/expenses` | Admin, Supervisor | List expenses |
+| POST | `/expenses` | Bearer JWT | Record an expense |
+| PUT | `/expenses/:id` | Admin, Supervisor | Correct an expense |
+| DELETE | `/expenses/:id` | Admin | Delete an expense |
 | GET | `/reports/sales` | Admin, Supervisor | Sales totals per day/week/month |
 | GET | `/reports/inventory` | Admin, Supervisor | Inventory valuation |
 | GET | `/reports/expenses` | Admin, Supervisor | Expense breakdown by category |
@@ -105,7 +120,7 @@ Set `DIAGNOSTICS_TOKEN` before exposing the API to support.
 
 ## Authentication
 
-Every request except `/health`, `/diagnostics*` and the login/recovery endpoints requires a
+Every request except `/auth/health`, `/diagnostics*` and the login/recovery endpoints requires a
 Supabase access token:
 
 ```
@@ -278,22 +293,55 @@ The routes below this point are still the target API.
 
 | Method | Endpoint | Description | Roles |
 | --- | --- | --- | --- |
-| GET | `/sales` | List sales (filtered by role) | All |
+| GET | `/sales` | List sales with their lines, newest first (`limit`, `offset`) | All |
 | GET | `/sales/:id` | Get sale details | All |
-| POST | `/sales` | Create new sale | Admin, Cashier |
-| POST | `/sales/:id/void` | Void a sale | Admin, Cashier |
+| POST | `/sales` | Create new sale | All |
+| POST | `/sales/:id/void` | Void a sale, with a reason | Admin, Supervisor |
 | GET | `/sales/:id/receipt` | Generate receipt | All |
+
+`POST /sales` sends products and quantities only. The database prices every line from the
+catalogue and moves the stock in the same statement, so a client never sends a price or a
+total:
+
+```json
+{
+  "items": [{ "product_id": "0b8f…", "quantity": 2 }],
+  "tax": "0.50",
+  "payment_method_id": "7d31…"
+}
+```
+
+`tax` and `payment_method_id` are optional. The answer is the stored sale plus its
+`sale_items`. No stock left answers `409`; an unknown or inactive product, a foreign
+tenant's product and a zero quantity answer `400`.
+
+Voiding needs a `reason`; a second void answers `409`. A void is the only edit a completed
+sale accepts, and it returns the units to stock.
+
+`GET /sales/:id/receipt` is not implemented yet.
 
 ### Inventory
 
 | Method | Endpoint | Description | Roles |
 | --- | --- | --- | --- |
-| GET | `/inventory` | List products with stock | All |
+| GET | `/inventory` | List products with stock (`active=true\|false`, `limit`, `offset`) | All |
 | GET | `/inventory/:id` | Get product details | All |
 | POST | `/inventory` | Create product | Admin, Supervisor |
-| PUT | `/inventory/:id` | Update product | Admin, Supervisor |
-| DELETE | `/inventory/:id` | Delete product | Admin |
+| PUT | `/inventory/:id` | Update product (not its stock) | Admin, Supervisor |
+| DELETE | `/inventory/:id` | Delete a product with no sales history | Admin |
 | POST | `/inventory/adjust` | Adjust stock level | Admin, Supervisor |
+
+`stock` cannot be written through `PUT /inventory/:id`; it answers `400` and points at
+`POST /inventory/adjust`, the only path that moves it:
+
+```json
+{ "product_id": "0b8f…", "adjustment": -1, "reason": "breakage" }
+```
+
+That records a `stock_adjustments` row — who, before, after — and lets the database apply
+the change, so the ledger and the shelf cannot disagree. `adjustment` is a signed integer
+and cannot be zero. Deleting a product that has been sold answers `409`; deactivate it
+with `"active": false` instead.
 
 ### Expenses
 
@@ -303,6 +351,12 @@ The routes below this point are still the target API.
 | POST | `/expenses` | Create expense | All |
 | PUT | `/expenses/:id` | Update expense | Admin, Supervisor |
 | DELETE | `/expenses/:id` | Delete expense | Admin |
+
+`POST /expenses` takes `amount`, plus an optional `category` (60 characters) and
+`description` (500). Anyone on shift may record one — the money already left the till —
+but only a supervisor or admin may correct or delete it.
+
+The Users and Audit sections below are still the target API.
 
 ### Users
 
@@ -325,33 +379,23 @@ The routes below this point are still the target API.
 
 ### Success
 
-```json
-{
-  "data": { ... },
-  "meta": {
-    "page": 1,
-    "limit": 20,
-    "total": 150
-  }
-}
-```
+The implemented routes return the row, or the array of rows, at the top level. There is no
+`data`/`meta` envelope; a listing route pages with `limit` and `offset`.
 
 ### Error
 
+The implemented routes answer with Nest's default shape, so `statusCode` is the number and
+`message` is the one sentence the POS can show:
+
 ```json
 {
-  "error": {
-    "code": "VALIDATION_ERROR",
-    "message": "Invalid input",
-    "details": [
-      {
-        "field": "amount",
-        "message": "Amount must be positive"
-      }
-    ]
-  }
+  "statusCode": 409,
+  "message": "not enough stock for this sale",
+  "error": "Conflict"
 }
 ```
+
+The envelope below is the target shape.
 
 ## Rate limits
 
